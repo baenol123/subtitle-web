@@ -59,7 +59,7 @@
   [할 일] 배포 주소 반영 (위 4번)
   [할 일] Search Console 등록 후 색인 생성 확인
   [할 일] 승인 후: index.html <head>의 "애드센스 승인 후 스크립트" 주석 위치에 코드 삽입
-  [참고] 문의 이메일은 현재 mkh060526@gmail.com — 바꾸려면 about/privacy/terms.html에서 수정
+  [참고] 문의 이메일은 현재 junsige29@gmail.com — 바꾸려면 about/privacy/terms.html에서 수정
 
 ────────────────────────────────────────
 6. API 키 발급 (사용자 안내용)
