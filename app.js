@@ -1,4 +1,5 @@
-import Anthropic from 'https://esm.run/@anthropic-ai/sdk';
+// esm.run은 리디렉션 별칭이라 최종 CDN 주소로 직접 로드 (Search Console 리디렉션 경고 방지)
+import Anthropic from 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk/+esm';
 // ffmpeg 라이브러리는 CDN이 아니라 vendor 폴더에서 로드 —
 // 내부 워커가 같은 출처(same-origin)여야 정상 동작한다.
 import { FFmpeg } from './vendor/ffmpeg/index.js';

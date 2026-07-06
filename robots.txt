@@ -1,5 +1,4 @@
 User-agent: *
 Allow: /
-Disallow: /vendor/
 
 Sitemap: https://makesubtitles.com/sitemap.xml
