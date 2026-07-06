@@ -8,19 +8,19 @@
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://makesubtitles.com/about.html</loc>
+    <loc>https://makesubtitles.com/about</loc>
     <lastmod>2026-07-07</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://makesubtitles.com/privacy.html</loc>
+    <loc>https://makesubtitles.com/privacy</loc>
     <lastmod>2026-07-07</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.4</priority>
   </url>
   <url>
-    <loc>https://makesubtitles.com/terms.html</loc>
+    <loc>https://makesubtitles.com/terms</loc>
     <lastmod>2026-07-07</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.4</priority>
