@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- ===== SEO 기본 ===== -->
+  <title>자막공방 — 영상 자막 추출 &amp; AI 번역 (무료 온라인 도구)</title>
+  <meta name="description" content="영상이나 오디오 파일을 올리면 Whisper AI가 자막(SRT)을 추출하고 Claude AI가 자연스러운 한국어로 번역합니다. 파일은 서버에 업로드되지 않고 브라우저에서 처리되는 개인정보 보호 중심의 무료 자막 도구입니다." />
+  <meta name="keywords" content="자막 추출, 자막 번역, SRT 번역, 영상 자막, Whisper, AI 번역, 일본어 자막 번역, 자동 자막 생성" />
+  <meta name="robots" content="index, follow" />
+  <!-- TODO: 배포 후 실제 주소로 변경하세요 (canonical, og:url, sitemap.xml, robots.txt) -->
+  <link rel="canonical" href="https://your-site.pages.dev/" />
+
+  <!-- ===== Open Graph / 소셜 공유 ===== -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="자막공방" />
+  <meta property="og:title" content="자막공방 — 영상 자막 추출 & AI 번역" />
+  <meta property="og:description" content="영상을 올리면 자막 추출부터 AI 번역까지 한 번에. 파일은 서버에 올라가지 않습니다." />
+  <meta property="og:url" content="https://your-site.pages.dev/" />
+  <meta property="og:locale" content="ko_KR" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="자막공방 — 영상 자막 추출 & AI 번역" />
+  <meta name="twitter:description" content="영상을 올리면 자막 추출부터 AI 번역까지 한 번에. 파일은 서버에 올라가지 않습니다." />
+
+  <!-- 애드센스 승인 후 스크립트를 이 위치에 삽입하세요 -->
+
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- ===== 구조화 데이터 (검색엔진용) ===== -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "자막공방",
+    "url": "https://your-site.pages.dev/",
+    "applicationCategory": "MultimediaApplication",
+    "operatingSystem": "Web",
+    "inLanguage": "ko",
+    "description": "영상/오디오에서 자막을 추출(Whisper)하고 AI(Claude)로 번역해 SRT로 저장하는 브라우저 기반 도구. 파일은 서버에 업로드되지 않습니다.",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "KRW" }
+  }
+  </script>
+</head>
+<body>
+  <!-- ===== 공통 헤더 (모든 페이지에 동일하게 유지) ===== -->
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="./">자막공방<span class="dot">.</span></a>
+      <nav class="site-nav" aria-label="주 메뉴">
+        <a href="./" class="current">자막 추출·번역</a>
+        <a href="about.html">소개</a>
+        <a href="privacy.html">개인정보처리방침</a>
+        <a href="terms.html">이용약관</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ===== 히어로 ===== -->
+  <section class="hero">
+    <h1>영상 자막 추출 &amp; AI 번역</h1>
+    <p>영상이나 오디오 파일을 올리면 Whisper AI가 자막을 추출하고, Claude AI가 자연스럽게 번역해 SRT 파일로 만들어 드립니다.
+       <strong>파일은 서버에 업로드되지 않고 브라우저 안에서만 처리됩니다.</strong></p>
+  </section>
+
+  <main class="container">
+    <!-- ===================================================== -->
+    <!-- 도구 영역 — app.js가 사용하는 id/class는 변경 금지     -->
+    <!-- ===================================================== -->
+
+    <!-- API 키 -->
+    <section class="panel" aria-labelledby="keys-h">
+      <h2 id="keys-h">1. API 키 <span class="meta">(브라우저에만 저장됩니다)</span></h2>
+      <div class="grid2">
+        <label>
+          Groq API 키 <span class="meta">— 자막 추출용 · <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer noopener">console.groq.com/keys</a> (무료 티어 있음)</span>
+          <input type="password" id="groqKey" placeholder="gsk_..." autocomplete="off" spellcheck="false" />
+        </label>
+        <label>
+          Anthropic API 키 <span class="meta">— 번역용 · <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a></span>
+          <input type="password" id="anthropicKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+        </label>
+      </div>
+    </section>
+
+    <!-- 설정 -->
+    <section class="panel" aria-labelledby="settings-h">
+      <h2 id="settings-h">2. 설정</h2>
+      <div class="grid4">
+        <label>
+          원본 언어
+          <select id="sourceLang">
+            <option value="ja" selected>일본어</option>
+            <option value="ko">한국어</option>
+            <option value="en">영어</option>
+            <option value="zh">중국어</option>
+            <option value="">자동 감지</option>
+          </select>
+        </label>
+        <label>
+          번역 언어
+          <select id="targetLang">
+            <option value="ko" selected>한국어</option>
+            <option value="en">영어</option>
+            <option value="ja">일본어</option>
+          </select>
+        </label>
+        <label>
+          번역 모델
+          <select id="model">
+            <option value="claude-haiku-4-5" selected>Haiku 4.5 — 빠름/저렴 (자막 추천)</option>
+            <option value="claude-sonnet-4-6">Sonnet 4.6 — 균형</option>
+            <option value="claude-opus-4-8">Opus 4.8 — 고품질</option>
+          </select>
+        </label>
+        <label class="checkline">
+          <span>옵션</span>
+          <span class="checks">
+            <label><input type="checkbox" id="skipTranslate" /> 추출만 (번역 안 함)</label>
+            <label><input type="checkbox" id="renameKorean" checked /> 파일명 한글화</label>
+          </span>
+        </label>
+      </div>
+      <details>
+        <summary>번역 톤 / 용어집 (선택)</summary>
+        <div class="grid2">
+          <label>
+            톤 지시
+            <textarea id="styleGuide" rows="3" spellcheck="false" placeholder="예: 존댓말 유지 / 친한 인물끼리는 반말 / 선배는 선배님으로 통일"></textarea>
+          </label>
+          <label>
+            용어집 <span class="meta">(한 줄에 하나, 원어 = 번역어)</span>
+            <textarea id="glossary" rows="3" spellcheck="false" placeholder="源氏名 = 예명&#10;お兄ちゃん = 오빠"></textarea>
+          </label>
+        </div>
+      </details>
+    </section>
+
+    <!-- 파일 입력 -->
+    <section class="panel" aria-labelledby="file-h">
+      <h2 id="file-h">3. 파일</h2>
+      <div id="dropZone" class="drop-zone">
+        <strong>영상 / 오디오 / SRT 파일을 여기에 드래그하거나 클릭해서 선택</strong>
+        <span class="meta">mp4 · mkv · webm · avi · mp3 · m4a · wav · ogg · srt — SRT를 올리면 번역만 합니다</span>
+        <input type="file" id="fileInput" accept="video/*,audio/*,.srt,.vtt,.mkv,.avi" hidden />
+      </div>
+      <div id="fileInfo" class="meta hidden"></div>
+      <div class="actions">
+        <button id="startBtn" class="primary" disabled>시작</button>
+        <button id="cancelBtn" class="hidden">중지</button>
+      </div>
+    </section>
+
+    <!-- 진행 상황 -->
+    <section class="panel hidden" id="progressPanel" aria-labelledby="progress-h">
+      <h2 id="progress-h">진행 상황</h2>
+      <ol class="steps" id="steps">
+        <li data-step="audio">오디오 추출 <span class="step-status"></span></li>
+        <li data-step="stt">자막 추출 (Whisper) <span class="step-status"></span></li>
+        <li data-step="filter">환각 필터 <span class="step-status"></span></li>
+        <li data-step="translate">번역 (Claude) <span class="step-status"></span></li>
+      </ol>
+      <div class="progress"><div id="progressBar"></div></div>
+      <div id="statusLine" class="meta"></div>
+    </section>
+
+    <div id="errorBanner" class="error-banner hidden"></div>
+
+    <!-- 결과 -->
+    <section class="panel hidden" id="resultPanel" aria-labelledby="result-h">
+      <h2 id="result-h">결과</h2>
+      <div id="resultStats" class="meta"></div>
+      <div class="actions">
+        <button id="downloadOriginalBtn">원문 SRT 다운로드</button>
+        <button id="downloadTranslatedBtn" class="primary">번역 SRT 다운로드</button>
+      </div>
+      <details>
+        <summary>미리보기</summary>
+        <pre id="preview"></pre>
+      </details>
+    </section>
+
+    <!-- ===================================================== -->
+    <!-- 이하 콘텐츠 영역 — 자유롭게 수정/추가 가능              -->
+    <!-- ===================================================== -->
+
+    <section class="content-section" aria-labelledby="features-h">
+      <h2 id="features-h">주요 기능</h2>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <h3>🔒 파일이 서버에 올라가지 않음</h3>
+          <p>영상은 브라우저 안에서만 처리됩니다. 오디오 추출도 사용자의 컴퓨터에서 이루어지기 때문에 원본 파일이 외부로 전송될 일이 없습니다.</p>
+        </article>
+        <article class="feature-card">
+          <h3>🎙️ 고정밀 자막 추출</h3>
+          <p>OpenAI Whisper 계열의 최신 음성 인식 모델(large-v3-turbo)을 사용해 일본어·영어·중국어 음성을 정확하게 텍스트로 변환합니다.</p>
+        </article>
+        <article class="feature-card">
+          <h3>🌏 문맥을 이해하는 AI 번역</h3>
+          <p>단순 기계 번역이 아니라 Claude AI가 앞뒤 대사의 흐름을 참고해 자연스러운 구어체 자막으로 번역합니다. 톤 지시와 용어집으로 말투와 고유명사를 통일할 수 있습니다.</p>
+        </article>
+        <article class="feature-card">
+          <h3>🧹 환각 자막 자동 제거</h3>
+          <p>음성 인식 AI가 묵음 구간에서 만들어내는 "시청해 주셔서 감사합니다" 같은 가짜 자막과 반복 문장을 자동으로 걸러냅니다.</p>
+        </article>
+        <article class="feature-card">
+          <h3>📄 SRT 파일 번역 지원</h3>
+          <p>이미 자막 파일이 있다면 SRT를 바로 업로드해 번역만 할 수도 있습니다. 실패한 문장은 마커로 표시되어 나중에 쉽게 찾아 수정할 수 있습니다.</p>
+        </article>
+        <article class="feature-card">
+          <h3>✏️ 파일명 한글화</h3>
+          <p>일본어·영어 제목의 파일명을 자연스러운 한글 제목으로 번역해서 저장합니다. 다운로드한 자막을 정리하기 편해집니다.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="content-section" aria-labelledby="howto-h">
+      <h2 id="howto-h">사용 방법</h2>
+      <ol class="howto-list">
+        <li><strong>API 키 준비</strong> — 자막 추출용 Groq 키(무료 티어 제공)와 번역용 Anthropic 키를 각 사이트에서 발급받아 입력합니다. 키는 사용자의 브라우저에만 저장됩니다.</li>
+        <li><strong>언어와 모델 선택</strong> — 원본 언어, 번역 언어, 번역 품질(모델)을 고릅니다. 자막 번역에는 빠르고 저렴한 Haiku로도 충분한 경우가 많습니다.</li>
+        <li><strong>파일 업로드</strong> — 영상·오디오·SRT 파일을 드래그해서 올리고 시작 버튼을 누릅니다.</li>
+        <li><strong>SRT 다운로드</strong> — 추출·번역이 끝나면 원문 자막과 번역 자막을 각각 SRT 파일로 내려받습니다. 영상 파일과 같은 이름으로 두면 대부분의 플레이어에서 자동으로 자막이 표시됩니다.</li>
+      </ol>
+    </section>
+
+    <section class="content-section" aria-labelledby="cost-h">
+      <h2 id="cost-h">비용 안내</h2>
+      <p>자막공방 자체는 무료입니다. 다만 자막 추출과 번역에 사용되는 AI는 사용자가 직접 발급한 API 키로 호출되며, 해당 사용량만큼 각 서비스(Groq, Anthropic)에 요금이 부과될 수 있습니다.
+         대략적인 감각으로 1시간 분량의 영상 기준, 자막 추출은 Groq 무료 티어 범위에서 처리되는 경우가 많고 번역은 Haiku 모델 기준 수십 원 수준입니다.
+         정확한 요금은 각 서비스의 요금 페이지를 참고해 주세요.</p>
+    </section>
+
+    <section class="content-section" aria-labelledby="faq-h">
+      <h2 id="faq-h">자주 묻는 질문</h2>
+      <div class="faq-list">
+        <details>
+          <summary>영상 파일이 서버에 업로드되나요?</summary>
+          <p>아니요. 영상 파일은 사용자의 브라우저 안에서만 처리됩니다. 브라우저가 영상에서 오디오만 추출한 뒤, 그 오디오는 자막 추출을 위해 Groq에, 추출된 자막 텍스트는 번역을 위해 Anthropic에 전송됩니다. 영상 원본이 저희 서버나 다른 곳에 저장되는 일은 없습니다.</p>
+        </details>
+        <details>
+          <summary>API 키는 안전하게 보관되나요?</summary>
+          <p>입력한 API 키는 사용자의 브라우저(localStorage)에만 저장되며 외부 서버로 전송되지 않습니다. 공용 컴퓨터에서는 사용 후 브라우저 데이터를 삭제하는 것을 권장합니다.</p>
+        </details>
+        <details>
+          <summary>이용 요금이 있나요?</summary>
+          <p>이 사이트는 무료입니다. 다만 AI 호출에 쓰이는 Groq/Anthropic API는 사용자 본인의 키로 호출되므로, 사용량에 따라 각 서비스에서 요금이 발생할 수 있습니다. Groq는 무료 티어를 제공하고, 번역은 1시간 분량 기준 수십~수백 원 수준입니다.</p>
+        </details>
+        <details>
+          <summary>어떤 파일 형식을 지원하나요?</summary>
+          <p>영상은 MP4, MKV, WebM, AVI 등 대부분의 형식을 지원하고, 오디오는 MP3, M4A, WAV, OGG 등을 지원합니다. 이미 자막이 있다면 SRT 파일을 올려 번역만 할 수도 있습니다.</p>
+        </details>
+        <details>
+          <summary>번역 품질은 어느 정도인가요?</summary>
+          <p>Claude AI가 앞뒤 대사 문맥을 함께 참고해 번역하므로 일반적인 기계 번역보다 자연스러운 구어체 자막이 나옵니다. 인물 말투나 고유명사를 통일하고 싶다면 톤 지시와 용어집 기능을 활용해 보세요. 번역 모델을 Sonnet이나 Opus로 올리면 품질이 더 좋아집니다.</p>
+        </details>
+        <details>
+          <summary>긴 영상도 처리할 수 있나요?</summary>
+          <p>네. 긴 영상은 자동으로 10분 단위로 나누어 처리한 뒤 타임스탬프를 이어 붙입니다. 다만 수 GB급의 아주 큰 파일은 브라우저 메모리 한계로 실패할 수 있으며, Groq 무료 티어의 시간당 처리량 제한에 걸리면 자동으로 대기 후 재시도합니다.</p>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===== 공통 푸터 (모든 페이지에 동일하게 유지) ===== -->
+  <footer class="site-footer">
+    <nav aria-label="푸터 메뉴">
+      <a href="./">자막 추출·번역</a>
+      <a href="about.html">사이트 소개</a>
+      <a href="privacy.html">개인정보처리방침</a>
+      <a href="terms.html">이용약관</a>
+    </nav>
+    <div>파일은 서버에 업로드되지 않습니다. 오디오는 Groq(자막 추출), 텍스트는 Anthropic(번역)으로만 전송됩니다.</div>
+    <div>© 2026 자막공방</div>
+  </footer>
+
+  <!-- FAQ 구조화 데이터 -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "영상 파일이 서버에 업로드되나요?",
+        "acceptedAnswer": { "@type": "Answer", "text": "아니요. 영상 파일은 사용자의 브라우저 안에서만 처리됩니다. 브라우저가 영상에서 오디오만 추출한 뒤, 오디오는 자막 추출을 위해 Groq에, 자막 텍스트는 번역을 위해 Anthropic에 전송됩니다." }
+      },
+      {
+        "@type": "Question",
+        "name": "API 키는 안전하게 보관되나요?",
+        "acceptedAnswer": { "@type": "Answer", "text": "입력한 API 키는 사용자의 브라우저(localStorage)에만 저장되며 외부 서버로 전송되지 않습니다." }
+      },
+      {
+        "@type": "Question",
+        "name": "이용 요금이 있나요?",
+        "acceptedAnswer": { "@type": "Answer", "text": "사이트 자체는 무료입니다. AI 호출은 사용자 본인의 Groq/Anthropic API 키로 이루어지며 사용량에 따라 각 서비스에서 요금이 발생할 수 있습니다." }
+      },
+      {
+        "@type": "Question",
+        "name": "어떤 파일 형식을 지원하나요?",
+        "acceptedAnswer": { "@type": "Answer", "text": "MP4, MKV, WebM, AVI 등의 영상과 MP3, M4A, WAV, OGG 등의 오디오를 지원하며, SRT 자막 파일을 올려 번역만 할 수도 있습니다." }
+      },
+      {
+        "@type": "Question",
+        "name": "긴 영상도 처리할 수 있나요?",
+        "acceptedAnswer": { "@type": "Answer", "text": "긴 영상은 자동으로 10분 단위로 나누어 처리한 뒤 타임스탬프를 이어 붙입니다. 수 GB급 파일은 브라우저 메모리 한계로 실패할 수 있습니다." }
+      }
+    ]
+  }
+  </script>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

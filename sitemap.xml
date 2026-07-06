@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- TODO: 배포 후 your-site.pages.dev를 실제 주소로 변경하세요. 새 페이지를 추가하면 여기에도 등록하세요. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://your-site.pages.dev/</loc>
+    <lastmod>2026-07-07</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://your-site.pages.dev/about.html</loc>
+    <lastmod>2026-07-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://your-site.pages.dev/privacy.html</loc>
+    <lastmod>2026-07-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+  </url>
+  <url>
+    <loc>https://your-site.pages.dev/terms.html</loc>
+    <lastmod>2026-07-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+  </url>
+</urlset>

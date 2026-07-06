@@ -1,0 +1,77 @@
+■ 자막공방 (subtitle-web) — 구조 및 운영 가이드
+
+────────────────────────────────────────
+1. 폴더 구조
+────────────────────────────────────────
+  index.html      메인 페이지 (자막 추출·번역 도구 + 소개/FAQ 콘텐츠)
+  about.html      사이트 소개
+  privacy.html    개인정보처리방침 (애드센스 필수)
+  terms.html      이용약관
+  _template.html  ★ 새 도구/페이지를 만들 때 복사해서 쓰는 템플릿
+  style.css       공통 스타일 (파스텔 테마, 디자인 토큰 기반)
+  app.js          자막 추출·번역 로직 (index.html 전용)
+  vendor/         ffmpeg 라이브러리 — 배포 시 반드시 포함, 수정 금지
+  robots.txt      검색엔진 크롤링 설정
+  sitemap.xml     사이트맵 (페이지 추가 시 갱신)
+
+────────────────────────────────────────
+2. 새 기능(도구) 추가하는 법
+────────────────────────────────────────
+  1) _template.html을 복사해 새 파일 생성 (예: sync.html)
+  2) 파일 안의 [바꾸기] 표시를 전부 수정
+  3) 도구 로직은 별도 js 파일로 작성 (예: sync.js)
+  4) 모든 html 파일의 내비게이션/푸터에 링크 추가
+  5) sitemap.xml에 새 페이지 URL 추가
+
+  · 색/모양을 바꾸고 싶으면 style.css 맨 위 "디자인 토큰"의 색상 변수만 수정
+  · app.js가 쓰는 id/class(index.html의 도구 영역)는 이름을 바꾸면 안 됨
+
+────────────────────────────────────────
+3. 로컬 실행
+────────────────────────────────────────
+  PowerShell:
+    cd "C:\Users\Owner\Desktop\새 폴더 (2)\subtitle-web"
+    python -m http.server 8000
+  브라우저: http://localhost:8000
+  (index.html 더블클릭으로는 열리지 않습니다 — file:// 제한)
+
+────────────────────────────────────────
+4. 배포 (무료)
+────────────────────────────────────────
+  방법 A — Cloudflare Pages (추천):
+    https://pages.cloudflare.com → Direct Upload로 폴더 업로드
+  방법 B — GitHub Pages:
+    저장소에 푸시 → Settings → Pages → Deploy from branch
+
+  ★ 배포 직후 할 일:
+    · "your-site.pages.dev"를 실제 주소로 전부 바꾸기
+      (index/about/privacy/terms의 canonical·og:url, sitemap.xml, robots.txt)
+    · Google Search Console에 사이트 등록 + sitemap.xml 제출
+
+────────────────────────────────────────
+5. 애드센스 신청 체크리스트
+────────────────────────────────────────
+  [완료] 개인정보처리방침 페이지 (쿠키/광고 고지 포함)
+  [완료] 이용약관, 사이트 소개 페이지
+  [완료] 본문 콘텐츠 (기능 소개, 사용 방법, FAQ)
+  [완료] SEO 메타태그, 구조화 데이터, sitemap, robots.txt
+  [할 일] 커스텀 도메인 연결 (pages.dev 같은 무료 서브도메인은 애드센스 등록이 안 될 수 있음 → 저가 도메인 구입 권장)
+  [할 일] 배포 주소 반영 (위 4번)
+  [할 일] Search Console 등록 후 색인 생성 확인
+  [할 일] 승인 후: index.html <head>의 "애드센스 승인 후 스크립트" 주석 위치에 코드 삽입
+  [참고] 문의 이메일은 현재 mkh060526@gmail.com — 바꾸려면 about/privacy/terms.html에서 수정
+
+────────────────────────────────────────
+6. API 키 발급 (사용자 안내용)
+────────────────────────────────────────
+  · Groq (자막 추출):  https://console.groq.com/keys — 무료 티어 있음
+  · Anthropic (번역):  https://console.anthropic.com/settings/keys — 토큰당 과금
+  · 키는 각 사용자의 브라우저(localStorage)에만 저장됨
+
+────────────────────────────────────────
+7. 제약/참고
+────────────────────────────────────────
+  · 최초 실행 시 ffmpeg 엔진(~30MB)을 CDN에서 다운로드 (이후 캐시됨)
+  · 수 GB급 대용량 영상은 브라우저 메모리 한계로 실패할 수 있음
+  · Groq 무료 티어는 시간당 처리량 제한이 있어 긴 영상은 자동 대기 후 재시도
+  · 번역 기본 모델은 Haiku(저렴) — 품질이 아쉬우면 Sonnet/Opus 선택

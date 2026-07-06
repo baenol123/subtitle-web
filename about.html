@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>사이트 소개 — 자막공방</title>
+  <meta name="description" content="자막공방은 영상 자막 추출과 AI 번역을 브라우저 안에서 처리하는 개인정보 보호 중심의 무료 도구입니다. 서비스의 목적, 동작 방식, 기술을 소개합니다." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://your-site.pages.dev/about.html" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="자막공방" />
+  <meta property="og:title" content="사이트 소개 — 자막공방" />
+  <meta property="og:description" content="자막공방의 목적, 동작 방식, 사용 기술을 소개합니다." />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="./">자막공방<span class="dot">.</span></a>
+      <nav class="site-nav" aria-label="주 메뉴">
+        <a href="./">자막 추출·번역</a>
+        <a href="about.html" class="current">소개</a>
+        <a href="privacy.html">개인정보처리방침</a>
+        <a href="terms.html">이용약관</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <article class="doc">
+      <h1>사이트 소개</h1>
+      <p class="updated">자막공방이 무엇을 하는 서비스이고, 어떻게 동작하는지 소개합니다.</p>
+
+      <h2>자막공방은 어떤 서비스인가요?</h2>
+      <p>자막공방은 <strong>영상·오디오 파일에서 자막을 추출하고, AI로 자연스럽게 번역해 SRT 파일로 만들어 주는 무료 웹 도구</strong>입니다.
+         해외 영상을 자주 보는 분, 어학 학습 자료를 만드는 분, 개인 소장 영상에 자막을 붙이고 싶은 분들이 별도의 프로그램 설치 없이
+         브라우저만으로 자막 작업을 끝낼 수 있도록 만들었습니다.</p>
+      <p>기존에 자막을 만들려면 음성 인식 프로그램을 설치하고, GPU 환경을 준비하고, 추출된 자막을 다시 번역기에 옮겨 붙이는
+         번거로운 과정을 거쳐야 했습니다. 자막공방은 이 전체 과정을 한 페이지에서, 버튼 한 번으로 처리하는 것을 목표로 합니다.</p>
+
+      <h2>어떻게 동작하나요?</h2>
+      <p>가장 중요한 설계 원칙은 <strong>"사용자의 파일을 서버에 올리지 않는다"</strong>는 것입니다. 처리 과정은 다음과 같습니다.</p>
+      <ul>
+        <li><strong>1단계 — 오디오 추출:</strong> 업로드한 영상은 서버로 전송되지 않고, 사용자의 브라우저 안에서 오디오만 분리됩니다. (WebAssembly로 컴파일된 FFmpeg 사용)</li>
+        <li><strong>2단계 — 자막 추출:</strong> 분리된 오디오를 음성 인식 AI(Whisper large-v3-turbo)에 보내 타임스탬프가 포함된 자막을 만듭니다.</li>
+        <li><strong>3단계 — 환각 필터:</strong> 음성 인식 AI가 묵음 구간에서 만들어내는 가짜 문장("시청해 주셔서 감사합니다" 등)과 반복 문장을 자동으로 제거합니다.</li>
+        <li><strong>4단계 — AI 번역:</strong> Claude AI가 앞뒤 대사의 문맥을 참고하며 자막을 번역합니다. 인물의 말투(톤)와 고유명사(용어집)를 지정할 수 있습니다.</li>
+        <li><strong>5단계 — SRT 저장:</strong> 원문 자막과 번역 자막을 각각 SRT 파일로 다운로드합니다.</li>
+      </ul>
+
+      <h2>왜 API 키를 직접 입력하나요?</h2>
+      <p>자막공방에는 서버가 없습니다. 사용자의 브라우저가 음성 인식(Groq)과 번역(Anthropic) 서비스를 직접 호출하는 구조라서,
+         각 서비스의 API 키를 사용자가 직접 발급받아 입력하는 방식을 사용합니다. 이 방식에는 두 가지 장점이 있습니다.</p>
+      <ul>
+        <li><strong>투명성:</strong> 데이터가 어디로 가는지 명확합니다. 오디오는 Groq으로, 자막 텍스트는 Anthropic으로만 전송되며 중간에 다른 서버를 거치지 않습니다.</li>
+        <li><strong>비용 통제:</strong> 사용한 만큼만 본인 계정에서 지불하므로 구독료나 숨은 비용이 없습니다. 자막 작업 비용은 1시간 분량 기준 수십~수백 원 수준입니다.</li>
+      </ul>
+      <p>입력한 API 키는 브라우저의 로컬 저장소(localStorage)에만 저장되며 외부로 전송되지 않습니다.</p>
+
+      <h2>앞으로의 계획</h2>
+      <p>자막공방은 자막 작업에 필요한 도구들을 하나씩 추가해 나갈 예정입니다. 자막 싱크 조정, 자막 형식 변환(SRT ↔ VTT ↔ LRC),
+         자막 검수 도우미 등 실제 자막 작업 과정에서 필요했던 기능들을 준비하고 있습니다.</p>
+
+      <h2>문의</h2>
+      <p>서비스 이용 중 불편한 점이나 제안하고 싶은 기능이 있다면 아래 이메일로 연락해 주세요.</p>
+      <p>이메일: <a href="mailto:mkh060526@gmail.com">mkh060526@gmail.com</a></p>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <nav aria-label="푸터 메뉴">
+      <a href="./">자막 추출·번역</a>
+      <a href="about.html">사이트 소개</a>
+      <a href="privacy.html">개인정보처리방침</a>
+      <a href="terms.html">이용약관</a>
+    </nav>
+    <div>© 2026 자막공방</div>
+  </footer>
+</body>
+</html>

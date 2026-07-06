@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /vendor/
+
+# TODO: 배포 후 실제 주소로 변경하세요
+Sitemap: https://your-site.pages.dev/sitemap.xml
