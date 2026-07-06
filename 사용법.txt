@@ -43,10 +43,8 @@
   방법 B — GitHub Pages:
     저장소에 푸시 → Settings → Pages → Deploy from branch
 
-  ★ 배포 직후 할 일:
-    · "your-site.pages.dev"를 실제 주소로 전부 바꾸기
-      (index/about/privacy/terms의 canonical·og:url, sitemap.xml, robots.txt)
-    · Google Search Console에 사이트 등록 + sitemap.xml 제출
+  ★ 현재 배포 상태: https://makesubtitles.com (커스텀 도메인 연결 완료)
+    · 남은 일: Google Search Console에 사이트 등록 + sitemap.xml 제출
 
 ────────────────────────────────────────
 5. 애드센스 신청 체크리스트
@@ -55,10 +53,11 @@
   [완료] 이용약관, 사이트 소개 페이지
   [완료] 본문 콘텐츠 (기능 소개, 사용 방법, FAQ)
   [완료] SEO 메타태그, 구조화 데이터, sitemap, robots.txt
-  [할 일] 커스텀 도메인 연결 (pages.dev 같은 무료 서브도메인은 애드센스 등록이 안 될 수 있음 → 저가 도메인 구입 권장)
-  [할 일] 배포 주소 반영 (위 4번)
+  [완료] 커스텀 도메인 연결 (https://makesubtitles.com)
+  [완료] 배포 주소 반영 (canonical/og:url/sitemap/robots)
+  [완료] 애드센스 스크립트 삽입 (전체 페이지 <head>)
+  [완료] ads.txt (pub-8450746629673540)
   [할 일] Search Console 등록 후 색인 생성 확인
-  [할 일] 승인 후: index.html <head>의 "애드센스 승인 후 스크립트" 주석 위치에 코드 삽입
   [참고] 문의 이메일은 현재 junsige29@gmail.com — 바꾸려면 about/privacy/terms.html에서 수정
 
 ────────────────────────────────────────
