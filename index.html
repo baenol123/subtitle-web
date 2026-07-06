@@ -145,9 +145,9 @@
     <section class="panel" aria-labelledby="file-h">
       <h2 id="file-h">3. 파일</h2>
       <div id="dropZone" class="drop-zone">
-        <strong>영상 / 오디오 / SRT 파일을 여기에 드래그하거나 클릭해서 선택</strong>
+        <strong>영상 / 오디오 / SRT 파일을 여기에 드래그하거나 클릭해서 선택 (여러 개 가능)</strong>
         <span class="meta">mp4 · mkv · webm · avi · mp3 · m4a · wav · ogg · srt — SRT를 올리면 번역만 합니다</span>
-        <input type="file" id="fileInput" accept="video/*,audio/*,.srt,.vtt,.mkv,.avi" hidden />
+        <input type="file" id="fileInput" accept="video/*,audio/*,.srt,.vtt,.mkv,.avi" multiple hidden />
       </div>
       <div id="fileInfo" class="meta hidden"></div>
       <div class="actions">
@@ -175,14 +175,10 @@
     <section class="panel hidden" id="resultPanel" aria-labelledby="result-h">
       <h2 id="result-h">결과</h2>
       <div id="resultStats" class="meta"></div>
+      <div id="resultsList" class="results-list"></div>
       <div class="actions">
-        <button id="downloadOriginalBtn">원문 SRT 다운로드</button>
-        <button id="downloadTranslatedBtn" class="primary">번역 SRT 다운로드</button>
+        <button id="downloadAllBtn" class="primary hidden">전체 다운로드</button>
       </div>
-      <details>
-        <summary>미리보기</summary>
-        <pre id="preview"></pre>
-      </details>
     </section>
 
     <!-- ===================================================== -->

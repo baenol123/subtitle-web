@@ -42,8 +42,9 @@ const STRINGS = {
     noTranslationInResponse: '응답에 번역이 없습니다.',
     translating: (done, total) => `번역 중... ${done}/${total} 블록`,
     translatingFilename: '파일명 번역 중...',
-    subtitleKind: '자막 파일 → 번역만 수행',
-    mediaKind: '영상/오디오 → 추출 + 번역',
+    subtitleKind: '자막 → 번역만',
+    mediaKind: '영상/오디오 → 추출+번역',
+    filesSelected: (n, mb) => `파일 ${n}개 · 총 ${mb} MB`,
     needGroqKey: '자막 추출에는 Groq API 키가 필요합니다.',
     needAnthropicKey: '번역에는 Anthropic API 키가 필요합니다.',
     nothingToDo: 'SRT 파일 + "추출만" 조합은 할 일이 없습니다.',
@@ -59,9 +60,14 @@ const STRINGS = {
     stopping: '중지하는 중...',
     statsBlocks: (n) => `자막 ${n}개`,
     statsRemoved: (n) => `환각 ${n}건 제거`,
-    statsFailed: (n, m) => `⚠️ ${n}개 블록은 "${m}" 마커로 표시됨`,
+    statsFailed: (n, m) => `⚠️ ${n}개 블록 "${m}" 표시`,
     statsFilename: (name) => `번역 파일명: ${name}.srt`,
     partialFail: (msg) => `일부 블록 번역 실패 — 마지막 오류: ${msg}`,
+    failedLabel: (msg) => `실패: ${msg}`,
+    batchDone: (ok, total) => `${total}개 중 ${ok}개 파일 처리 완료`,
+    downloadOriginal: '원문 SRT',
+    downloadTranslated: '번역 SRT',
+    downloadAll: '전체 다운로드',
   },
   en: {
     manualMarker: '[❗NEEDS MANUAL TRANSLATION]',
@@ -80,8 +86,9 @@ const STRINGS = {
     noTranslationInResponse: 'No translation in the response.',
     translating: (done, total) => `Translating... ${done}/${total} blocks`,
     translatingFilename: 'Translating file name...',
-    subtitleKind: 'subtitle file → translate only',
+    subtitleKind: 'subtitle → translate only',
     mediaKind: 'video/audio → extract + translate',
+    filesSelected: (n, mb) => `${n} file(s) · ${mb} MB total`,
     needGroqKey: 'A Groq API key is required for subtitle extraction.',
     needAnthropicKey: 'An Anthropic API key is required for translation.',
     nothingToDo: 'SRT file + "extract only" leaves nothing to do.',
@@ -97,9 +104,14 @@ const STRINGS = {
     stopping: 'Stopping...',
     statsBlocks: (n) => `${n} subtitles`,
     statsRemoved: (n) => `${n} hallucinations removed`,
-    statsFailed: (n, m) => `⚠️ ${n} block(s) marked with "${m}"`,
+    statsFailed: (n, m) => `⚠️ ${n} marked "${m}"`,
     statsFilename: (name) => `Translated file name: ${name}.srt`,
     partialFail: (msg) => `Some blocks failed to translate — last error: ${msg}`,
+    failedLabel: (msg) => `Failed: ${msg}`,
+    batchDone: (ok, total) => `${ok} of ${total} file(s) processed`,
+    downloadOriginal: 'Original SRT',
+    downloadTranslated: 'Translated SRT',
+    downloadAll: 'Download all',
   },
 };
 
@@ -162,9 +174,7 @@ const els = {
   progressBar: $('progressBar'), statusLine: $('statusLine'),
   errorBanner: $('errorBanner'),
   resultPanel: $('resultPanel'), resultStats: $('resultStats'),
-  downloadOriginalBtn: $('downloadOriginalBtn'),
-  downloadTranslatedBtn: $('downloadTranslatedBtn'),
-  preview: $('preview'),
+  resultsList: $('resultsList'), downloadAllBtn: $('downloadAllBtn'),
 };
 
 // 설정 localStorage 저장/복원
@@ -179,12 +189,13 @@ for (const key of PERSIST) {
 // 상태
 // ─────────────────────────────────────────────────────────────
 
-let selectedFile = null;
+let selectedFiles = [];
 let ffmpeg = null;
 let cancelled = false;
 let abortController = null;
 let running = false;
-let results = { originalSrt: '', translatedSrt: '', baseName: '', translatedName: '' };
+let currentFileLabel = '';
+let allResults = [];
 
 // ─────────────────────────────────────────────────────────────
 // UI 헬퍼
@@ -198,11 +209,17 @@ function setStep(name, state, statusText = '') {
   li.querySelector('.step-status').textContent = statusText;
 }
 
+function resetSteps() {
+  for (const step of ['audio', 'stt', 'filter', 'translate']) setStep(step, null, '');
+}
+
 function setProgress(ratio) {
   els.progressBar.style.width = `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
 }
 
-function setStatus(text) { els.statusLine.textContent = text; }
+function setStatus(text) {
+  els.statusLine.textContent = currentFileLabel ? `${currentFileLabel} — ${text}` : text;
+}
 
 function showError(message) {
   els.errorBanner.textContent = message;
@@ -224,7 +241,7 @@ function sleep(ms) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 파일 선택
+// 파일 선택 (여러 개 지원)
 // ─────────────────────────────────────────────────────────────
 
 function fileExt(name) {
@@ -232,26 +249,35 @@ function fileExt(name) {
   return i >= 0 ? name.slice(i).toLowerCase() : '';
 }
 
-function handleFile(file) {
-  if (running) return;
-  selectedFile = file;
-  const mb = (file.size / 1e6).toFixed(1);
-  const kind = SUBTITLE_EXTS.includes(fileExt(file.name)) ? T.subtitleKind : T.mediaKind;
-  els.fileInfo.textContent = `${file.name} (${mb} MB) — ${kind}`;
+function isSubtitleFile(file) {
+  return SUBTITLE_EXTS.includes(fileExt(file.name));
+}
+
+function handleFiles(files) {
+  if (running || files.length === 0) return;
+  selectedFiles = Array.from(files);
+  const totalMb = (selectedFiles.reduce((sum, f) => sum + f.size, 0) / 1e6).toFixed(1);
+  const lines = selectedFiles.map((f) => {
+    const kind = isSubtitleFile(f) ? T.subtitleKind : T.mediaKind;
+    return `• ${f.name} (${(f.size / 1e6).toFixed(1)} MB) — ${kind}`;
+  });
+  els.fileInfo.innerHTML = '';
+  els.fileInfo.append(
+    Object.assign(document.createElement('div'), { textContent: T.filesSelected(selectedFiles.length, totalMb) }),
+    ...lines.map((l) => Object.assign(document.createElement('div'), { textContent: l }))
+  );
   els.fileInfo.classList.remove('hidden');
   els.startBtn.disabled = false;
 }
 
 els.dropZone.addEventListener('click', () => els.fileInput.click());
-els.fileInput.addEventListener('change', () => {
-  if (els.fileInput.files[0]) handleFile(els.fileInput.files[0]);
-});
+els.fileInput.addEventListener('change', () => handleFiles(els.fileInput.files));
 els.dropZone.addEventListener('dragover', (e) => { e.preventDefault(); els.dropZone.classList.add('dragover'); });
 els.dropZone.addEventListener('dragleave', () => els.dropZone.classList.remove('dragover'));
 els.dropZone.addEventListener('drop', (e) => {
   e.preventDefault();
   els.dropZone.classList.remove('dragover');
-  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  handleFiles(e.dataTransfer.files);
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -635,7 +661,7 @@ async function translateBlocks(client, blocks) {
   };
 }
 
-// 파일명(제목) 한글화 — 실패해도 원래 이름을 쓴다
+// 파일명(제목)을 대상 언어로 번역 — 실패하면 원래 이름을 쓴다
 async function translateFileName(client, baseName) {
   try {
     const parsed = await callClaude(client, buildBatchPrompt([{ id: 0, text: baseName }], {
@@ -656,7 +682,7 @@ async function translateFileName(client, baseName) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 다운로드
+// 결과 표시/다운로드
 // ─────────────────────────────────────────────────────────────
 
 function downloadText(text, filename) {
@@ -668,22 +694,151 @@ function downloadText(text, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-els.downloadOriginalBtn.addEventListener('click', () => {
-  if (results.originalSrt) downloadText(results.originalSrt, `${results.baseName}.srt`);
-});
-els.downloadTranslatedBtn.addEventListener('click', () => {
-  if (results.translatedSrt) downloadText(results.translatedSrt, `${results.translatedName}.srt`);
+function renderResultRow(result) {
+  const row = document.createElement('div');
+  row.className = 'result-item';
+
+  const info = document.createElement('div');
+  info.className = 'result-info';
+  const title = document.createElement('strong');
+  title.textContent = result.fileName;
+  const meta = document.createElement('span');
+  meta.className = 'meta';
+  if (result.error) {
+    meta.textContent = T.failedLabel(result.error);
+    row.classList.add('failed');
+  } else {
+    meta.textContent = [
+      T.statsBlocks(result.blockCount),
+      result.removed > 0 ? T.statsRemoved(result.removed) : '',
+      result.failed > 0 ? T.statsFailed(result.failed, MANUAL_MARKER) : '',
+      result.translatedName !== result.baseName ? T.statsFilename(result.translatedName) : '',
+    ].filter(Boolean).join(' · ');
+  }
+  info.append(title, meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'result-actions';
+  if (result.originalSrt) {
+    const btn = document.createElement('button');
+    btn.textContent = T.downloadOriginal;
+    btn.addEventListener('click', () => downloadText(result.originalSrt, `${result.baseName}.srt`));
+    actions.append(btn);
+  }
+  if (result.translatedSrt) {
+    const btn = document.createElement('button');
+    btn.className = 'primary';
+    btn.textContent = T.downloadTranslated;
+    btn.addEventListener('click', () => downloadText(result.translatedSrt, `${result.translatedName}.srt`));
+    actions.append(btn);
+  }
+
+  row.append(info, actions);
+  els.resultsList.append(row);
+}
+
+els.downloadAllBtn.addEventListener('click', async () => {
+  for (const r of allResults) {
+    if (r.translatedSrt) {
+      downloadText(r.translatedSrt, `${r.translatedName}.srt`);
+    } else if (r.originalSrt) {
+      downloadText(r.originalSrt, `${r.baseName}.srt`);
+    }
+    // 브라우저의 연속 다운로드 차단을 피하기 위한 간격
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
 });
 
 // ─────────────────────────────────────────────────────────────
-// 메인 파이프라인
+// 파일 하나 처리
+// ─────────────────────────────────────────────────────────────
+
+async function processOne(file) {
+  const isSubtitle = isSubtitleFile(file);
+  const skipTranslate = els.skipTranslate.checked;
+  const baseName = file.name.replace(/\.[^.]+$/, '');
+  const result = {
+    fileName: file.name,
+    baseName,
+    translatedName: baseName,
+    originalSrt: '',
+    translatedSrt: '',
+    blockCount: 0,
+    removed: 0,
+    failed: 0,
+    lastError: '',
+  };
+
+  resetSteps();
+  let blocks;
+
+  if (isSubtitle) {
+    setStep('audio', 'skipped'); setStep('stt', 'skipped'); setStep('filter', 'skipped');
+    blocks = parseSrt(await file.text());
+    result.originalSrt = buildSrt(blocks);
+  } else {
+    // 1. 오디오 추출
+    setStep('audio', 'active');
+    const chunks = await extractAudioChunks(file);
+    setStep('audio', 'done', T.chunksLabel(chunks.length));
+    checkCancelled();
+
+    // 2. Whisper 자막 추출
+    setStep('stt', 'active');
+    const segments = [];
+    for (const [i, chunk] of chunks.entries()) {
+      setStatus(T.chunkProgress(i + 1, chunks.length));
+      setProgress(i / chunks.length);
+      segments.push(...await transcribeChunk(chunk.blob, chunk.offset, i + 1, chunks.length));
+    }
+    setStep('stt', 'done', T.segmentsLabel(segments.length));
+    checkCancelled();
+
+    // 3. 환각 필터
+    setStep('filter', 'active');
+    const { kept, removed } = filterHallucinations(segments);
+    result.removed = removed;
+    setStep('filter', 'done', removed > 0 ? T.removedLabel(removed) : T.noIssues);
+    if (kept.length === 0) throw new Error(T.noSubtitles);
+
+    blocks = segmentsToBlocks(kept);
+    result.originalSrt = buildSrt(blocks);
+  }
+
+  result.blockCount = blocks.length;
+
+  // 4. 번역
+  if (skipTranslate) {
+    setStep('translate', 'skipped');
+  } else {
+    setStep('translate', 'active');
+    const client = new Anthropic({ apiKey: els.anthropicKey.value.trim(), dangerouslyAllowBrowser: true });
+    const translation = await translateBlocks(client, blocks);
+    result.failed = translation.failed;
+    result.lastError = translation.lastError;
+    result.translatedSrt = buildSrt(translation.blocks);
+
+    if (els.renameKorean.checked) {
+      setStatus(T.translatingFilename);
+      const translatedName = await translateFileName(client, baseName);
+      if (translatedName && translatedName !== baseName) result.translatedName = translatedName;
+    }
+    setStep('translate', 'done', result.failed > 0 ? T.manualNeeded(result.failed) : T.done);
+  }
+
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 메인 파이프라인 (여러 파일 순차 처리)
 // ─────────────────────────────────────────────────────────────
 
 async function run() {
-  const isSubtitle = SUBTITLE_EXTS.includes(fileExt(selectedFile.name));
   const skipTranslate = els.skipTranslate.checked;
+  const hasMedia = selectedFiles.some((f) => !isSubtitleFile(f));
+  const allSubtitles = selectedFiles.every((f) => isSubtitleFile(f));
 
-  if (!isSubtitle && !els.groqKey.value.trim()) {
+  if (hasMedia && !els.groqKey.value.trim()) {
     showError(T.needGroqKey);
     return;
   }
@@ -691,7 +846,7 @@ async function run() {
     showError(T.needAnthropicKey);
     return;
   }
-  if (isSubtitle && skipTranslate) {
+  if (allSubtitles && skipTranslate) {
     showError(T.nothingToDo);
     return;
   }
@@ -699,105 +854,73 @@ async function run() {
   running = true;
   cancelled = false;
   abortController = new AbortController();
+  allResults = [];
   els.errorBanner.classList.add('hidden');
   els.resultPanel.classList.add('hidden');
+  els.resultsList.innerHTML = '';
+  els.downloadAllBtn.classList.add('hidden');
   els.progressPanel.classList.remove('hidden');
   els.startBtn.disabled = true;
   els.cancelBtn.classList.remove('hidden');
-  for (const step of ['audio', 'stt', 'filter', 'translate']) setStep(step, null, '');
+  resetSteps();
   setProgress(0);
 
-  const baseName = selectedFile.name.replace(/\.[^.]+$/, '');
-  results = { originalSrt: '', translatedSrt: '', baseName, translatedName: baseName };
+  let fatalMessage = '';
 
   try {
-    let blocks;
-    let removedCount = 0;
-
-    if (isSubtitle) {
-      setStep('audio', 'skipped'); setStep('stt', 'skipped'); setStep('filter', 'skipped');
-      blocks = parseSrt(await selectedFile.text());
-      results.originalSrt = buildSrt(blocks);
-    } else {
-      // 1. 오디오 추출
-      setStep('audio', 'active');
-      const chunks = await extractAudioChunks(selectedFile);
-      setStep('audio', 'done', T.chunksLabel(chunks.length));
+    for (const [i, file] of selectedFiles.entries()) {
       checkCancelled();
-
-      // 2. Whisper 자막 추출
-      setStep('stt', 'active');
-      const segments = [];
-      for (const [i, chunk] of chunks.entries()) {
-        setStatus(T.chunkProgress(i + 1, chunks.length));
-        setProgress(i / chunks.length);
-        segments.push(...await transcribeChunk(chunk.blob, chunk.offset, i + 1, chunks.length));
+      currentFileLabel = selectedFiles.length > 1 ? `[${i + 1}/${selectedFiles.length}] ${file.name}` : file.name;
+      setStatus('...');
+      try {
+        const result = await processOne(file);
+        allResults.push(result);
+      } catch (err) {
+        // 취소나 키 오류는 전체 중단, 그 외에는 이 파일만 실패 처리하고 계속
+        if (cancelled || isFatalApiError(err)) throw err;
+        console.error(err);
+        allResults.push({
+          fileName: file.name,
+          baseName: file.name.replace(/\.[^.]+$/, ''),
+          translatedName: file.name.replace(/\.[^.]+$/, ''),
+          originalSrt: '', translatedSrt: '',
+          blockCount: 0, removed: 0, failed: 0,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-      setStep('stt', 'done', T.segmentsLabel(segments.length));
-      checkCancelled();
-
-      // 3. 환각 필터
-      setStep('filter', 'active');
-      const { kept, removed } = filterHallucinations(segments);
-      removedCount = removed;
-      setStep('filter', 'done', removed > 0 ? T.removedLabel(removed) : T.noIssues);
-      if (kept.length === 0) throw new Error(T.noSubtitles);
-
-      blocks = segmentsToBlocks(kept);
-      results.originalSrt = buildSrt(blocks);
     }
-
-    // 4. 번역
-    let failed = 0;
-    let translateError = '';
-    if (skipTranslate) {
-      setStep('translate', 'skipped');
-    } else {
-      setStep('translate', 'active');
-      const client = new Anthropic({ apiKey: els.anthropicKey.value.trim(), dangerouslyAllowBrowser: true });
-      const translation = await translateBlocks(client, blocks);
-      failed = translation.failed;
-      translateError = translation.lastError;
-      results.translatedSrt = buildSrt(translation.blocks);
-
-      if (els.renameKorean.checked) {
-        setStatus(T.translatingFilename);
-        const koreanName = await translateFileName(client, baseName);
-        if (koreanName && koreanName !== baseName) results.translatedName = koreanName;
-      }
-      setStep('translate', 'done', failed > 0 ? T.manualNeeded(failed) : T.done);
-    }
-
-    // 결과 표시
-    setProgress(1);
-    setStatus(T.done);
-    const stats = [
-      T.statsBlocks(blocks.length),
-      removedCount > 0 ? T.statsRemoved(removedCount) : '',
-      failed > 0 ? T.statsFailed(failed, MANUAL_MARKER) : '',
-      results.translatedName !== baseName ? T.statsFilename(results.translatedName) : '',
-    ].filter(Boolean).join(' · ');
-    els.resultStats.textContent = stats;
-    if (failed > 0 && translateError) {
-      showError(T.partialFail(translateError.slice(0, 400)));
-    }
-    els.downloadOriginalBtn.disabled = !results.originalSrt;
-    els.downloadTranslatedBtn.disabled = !results.translatedSrt;
-    els.downloadTranslatedBtn.classList.toggle('hidden', skipTranslate);
-    els.preview.textContent = (results.translatedSrt || results.originalSrt).slice(0, 4000);
-    els.resultPanel.classList.remove('hidden');
   } catch (err) {
     console.error(err);
-    showError(err instanceof Error ? err.message : String(err));
-    setStatus(T.aborted);
+    fatalMessage = err instanceof Error ? err.message : String(err);
   } finally {
+    currentFileLabel = '';
     running = false;
     els.startBtn.disabled = false;
     els.cancelBtn.classList.add('hidden');
   }
+
+  // 결과 표시 (부분 완료 포함)
+  const okResults = allResults.filter((r) => !r.error);
+  if (allResults.length > 0) {
+    for (const r of allResults) renderResultRow(r);
+    els.resultStats.textContent = T.batchDone(okResults.length, selectedFiles.length);
+    els.downloadAllBtn.classList.toggle('hidden', okResults.length < 2);
+    els.resultPanel.classList.remove('hidden');
+  }
+
+  if (fatalMessage) {
+    showError(fatalMessage);
+    setStatus(T.aborted);
+  } else {
+    setProgress(1);
+    setStatus(T.done);
+    const lastError = allResults.map((r) => r.lastError || r.error).filter(Boolean).pop();
+    const anyFailedBlocks = allResults.some((r) => r.failed > 0);
+    if (anyFailedBlocks && lastError) showError(T.partialFail(String(lastError).slice(0, 400)));
+  }
 }
 
-els.startBtn.addEventListener('click', () => { if (selectedFile && !running) run(); });
+els.startBtn.addEventListener('click', () => { if (selectedFiles.length > 0 && !running) run(); });
 els.cancelBtn.addEventListener('click', () => {
   cancelled = true;
   abortController?.abort();

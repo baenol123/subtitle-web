@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>About — MakeSubtitles</title>
+  <meta name="description" content="MakeSubtitles is a privacy-first free tool that extracts and translates video subtitles inside your browser. Learn how it works and why it was built." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://makesubtitles.com/en/about" />
+  <link rel="alternate" hreflang="ko" href="https://makesubtitles.com/about" />
+  <link rel="alternate" hreflang="en" href="https://makesubtitles.com/en/about" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="MakeSubtitles" />
+  <meta property="og:title" content="About — MakeSubtitles" />
+  <meta property="og:description" content="How MakeSubtitles works and why it was built." />
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8450746629673540"
+     crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="/en/">MakeSubtitles<span class="dot">.</span></a>
+      <nav class="site-nav" aria-label="Main menu">
+        <a href="/en/">Subtitle Tool</a>
+        <a href="/en/about" class="current">About</a>
+        <a href="/en/privacy">Privacy</a>
+        <a href="/en/terms">Terms</a>
+        <a href="/about">한국어</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <article class="doc">
+      <h1>About</h1>
+      <p class="updated">What MakeSubtitles is and how it works.</p>
+
+      <h2>What is MakeSubtitles?</h2>
+      <p>MakeSubtitles is a <strong>free web tool that extracts subtitles from video or audio files and translates them
+         with AI, saved as SRT files</strong>. It's built for people who watch foreign-language videos, create language-learning
+         material, or want subtitles for their personal video collection — without installing any software.</p>
+      <p>Traditionally, making subtitles meant installing speech-recognition software, setting up a GPU environment,
+         and copy-pasting the results into a translator. MakeSubtitles aims to compress that entire workflow into a
+         single page and a single button.</p>
+
+      <h2>How does it work?</h2>
+      <p>The most important design principle is: <strong>your files are never uploaded to a server.</strong> The pipeline looks like this:</p>
+      <ul>
+        <li><strong>Step 1 — Audio extraction:</strong> your video never leaves your device. The browser separates the audio track locally, using FFmpeg compiled to WebAssembly.</li>
+        <li><strong>Step 2 — Subtitle extraction:</strong> the audio is transcribed by Whisper large-v3-turbo, a state-of-the-art speech recognition model, producing timestamped subtitles.</li>
+        <li><strong>Step 3 — Hallucination filter:</strong> fake lines that speech models invent during silence ("Thanks for watching" and the like) and abnormal repetitions are removed automatically.</li>
+        <li><strong>Step 4 — AI translation:</strong> Claude AI translates the subtitles while considering the surrounding dialogue. You can pin down speech styles (tone) and terminology (glossary).</li>
+        <li><strong>Step 5 — SRT download:</strong> you get both the original and the translated subtitles as SRT files.</li>
+      </ul>
+
+      <h2>Why do I enter my own API keys?</h2>
+      <p>MakeSubtitles has no server. Your browser calls the speech-recognition service (Groq) and the translation
+         service (Anthropic) directly, so you bring your own API keys. This design has two advantages:</p>
+      <ul>
+        <li><strong>Transparency:</strong> it's clear where your data goes. Audio goes to Groq, subtitle text goes to Anthropic — nothing passes through any middleman server.</li>
+        <li><strong>Cost control:</strong> you pay only for what you use, on your own accounts. Processing an hour-long video typically costs a few cents.</li>
+      </ul>
+      <p>Your API keys are stored only in your browser's local storage and are never transmitted anywhere else.</p>
+
+      <h2>What's next</h2>
+      <p>We plan to keep adding tools that subtitle work actually needs — subtitle timing adjustment, format conversion
+         (SRT ↔ VTT ↔ LRC), and proofreading helpers.</p>
+
+      <h2>Contact</h2>
+      <p>Found a problem or have a feature request? Email us at
+         <a href="mailto:junsige29@gmail.com">junsige29@gmail.com</a>.</p>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <nav aria-label="Footer menu">
+      <a href="/en/">Subtitle Tool</a>
+      <a href="/en/about">About</a>
+      <a href="/en/privacy">Privacy</a>
+      <a href="/en/terms">Terms</a>
+      <a href="/">한국어</a>
+    </nav>
+    <div>© 2026 MakeSubtitles</div>
+  </footer>
+</body>
+</html>

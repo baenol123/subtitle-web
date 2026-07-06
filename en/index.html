@@ -48,9 +48,9 @@
       <a class="brand" href="/en/">MakeSubtitles<span class="dot">.</span></a>
       <nav class="site-nav" aria-label="Main menu">
         <a href="/en/" class="current">Subtitle Tool</a>
-        <a href="/about">About</a>
-        <a href="/privacy">Privacy</a>
-        <a href="/terms">Terms</a>
+        <a href="/en/about">About</a>
+        <a href="/en/privacy">Privacy</a>
+        <a href="/en/terms">Terms</a>
         <a href="/">한국어</a>
       </nav>
     </div>
@@ -134,9 +134,9 @@
     <section class="panel" aria-labelledby="file-h">
       <h2 id="file-h">3. File</h2>
       <div id="dropZone" class="drop-zone">
-        <strong>Drag a video / audio / SRT file here, or click to select</strong>
+        <strong>Drag video / audio / SRT files here, or click to select (multiple allowed)</strong>
         <span class="meta">mp4 · mkv · webm · avi · mp3 · m4a · wav · ogg · srt — upload an SRT to translate only</span>
-        <input type="file" id="fileInput" accept="video/*,audio/*,.srt,.vtt,.mkv,.avi" hidden />
+        <input type="file" id="fileInput" accept="video/*,audio/*,.srt,.vtt,.mkv,.avi" multiple hidden />
       </div>
       <div id="fileInfo" class="meta hidden"></div>
       <div class="actions">
@@ -160,16 +160,12 @@
     <div id="errorBanner" class="error-banner hidden"></div>
 
     <section class="panel hidden" id="resultPanel" aria-labelledby="result-h">
-      <h2 id="result-h">Result</h2>
+      <h2 id="result-h">Results</h2>
       <div id="resultStats" class="meta"></div>
+      <div id="resultsList" class="results-list"></div>
       <div class="actions">
-        <button id="downloadOriginalBtn">Download original SRT</button>
-        <button id="downloadTranslatedBtn" class="primary">Download translated SRT</button>
+        <button id="downloadAllBtn" class="primary hidden">Download all</button>
       </div>
-      <details>
-        <summary>Preview</summary>
-        <pre id="preview"></pre>
-      </details>
     </section>
 
     <!-- ===== Content ===== -->
@@ -244,9 +240,9 @@
   <footer class="site-footer">
     <nav aria-label="Footer menu">
       <a href="/en/">Subtitle Tool</a>
-      <a href="/about">About</a>
-      <a href="/privacy">Privacy</a>
-      <a href="/terms">Terms</a>
+      <a href="/en/about">About</a>
+      <a href="/en/privacy">Privacy</a>
+      <a href="/en/terms">Terms</a>
       <a href="/">한국어</a>
     </nav>
     <div>Files are never uploaded to our servers. Audio goes to Groq (transcription) and text to Anthropic (translation) only.</div>
