@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SRT 자막 파일이란? 형식과 사용법 총정리 | 자막공방</title>
+  <meta name="description" content="가장 널리 쓰이는 자막 형식 SRT의 구조를 예제로 설명합니다. 자막이 자동으로 재생되게 하는 파일명 규칙, 인코딩 문제 해결, SMI·VTT와의 차이까지." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://makesubtitles.com/guide/what-is-srt" />
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="자막공방" />
+  <meta property="og:title" content="SRT 자막 파일이란? 형식과 사용법 총정리" />
+  <meta property="og:description" content="SRT의 구조, 파일명 규칙, 인코딩 문제, 다른 자막 형식과의 차이" />
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8450746629673540"
+     crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="/style.css" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "SRT 자막 파일이란? 형식과 사용법 총정리",
+    "inLanguage": "ko",
+    "datePublished": "2026-07-07",
+    "author": { "@type": "Organization", "name": "자막공방" },
+    "publisher": { "@type": "Organization", "name": "자막공방" },
+    "mainEntityOfPage": "https://makesubtitles.com/guide/what-is-srt"
+  }
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="/">자막공방<span class="dot">.</span></a>
+      <nav class="site-nav" aria-label="주 메뉴">
+        <a href="/">자막 추출·번역</a>
+        <a href="/guide/" class="current">가이드</a>
+        <a href="/about">소개</a>
+        <a href="/privacy">개인정보처리방침</a>
+        <a href="/terms">이용약관</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <article class="doc">
+      <h1>SRT 자막 파일이란? 형식과 사용법 총정리</h1>
+      <p class="updated">2026년 7월 7일 · 자막공방 가이드</p>
+
+      <p>자막 파일을 다루다 보면 가장 자주 만나는 확장자가 <strong>.srt</strong>입니다.
+         SRT(SubRip Text)는 구조가 단순해서 거의 모든 영상 플레이어, 편집 프로그램, 스트리밍 플랫폼이 지원하는
+         <strong>자막계의 표준 형식</strong>입니다.</p>
+
+      <h2>SRT 파일의 구조</h2>
+      <p>SRT는 평범한 텍스트 파일입니다. 메모장으로 열어보면 이런 블록이 반복됩니다.</p>
+      <pre>1
+00:00:03,500 --> 00:00:06,200
+안녕하세요, 오늘은 자막 이야기를 해볼게요.
+
+2
+00:00:06,800 --> 00:00:09,100
+생각보다 간단합니다.</pre>
+      <p>각 블록은 세 부분으로 이루어집니다.</p>
+      <ul>
+        <li><strong>번호</strong> — 자막의 순번 (1부터 증가)</li>
+        <li><strong>타임스탬프</strong> — 자막이 표시될 시작 시간과 끝 시간. <code>시:분:초,밀리초</code> 형식이고 구분자로 쉼표를 씁니다.</li>
+        <li><strong>자막 텍스트</strong> — 실제 표시될 내용. 여러 줄도 가능합니다.</li>
+      </ul>
+      <p>블록과 블록 사이는 빈 줄로 구분합니다. 이 구조만 지키면 어떤 도구로 만들어도 호환됩니다.</p>
+
+      <h2>자막이 자동으로 뜨게 하는 법 — 파일명 규칙</h2>
+      <p>플레이어에서 자막을 수동으로 불러올 필요 없이 자동으로 표시되게 하려면
+         <strong>영상 파일과 SRT 파일의 이름을 똑같이 맞추고 같은 폴더에 두면 됩니다.</strong></p>
+      <pre>여행기록.mp4
+여행기록.srt      ← 자동으로 로드됨</pre>
+      <p>언어를 구분하고 싶다면 <code>여행기록.ko.srt</code>처럼 언어 코드를 붙이는 방식도 대부분의 플레이어가 인식합니다.</p>
+
+      <h2>자막이 깨져 보인다면 — 인코딩 문제</h2>
+      <p>오래된 자막 파일이 <code>ìží ê¹¨ì§</code>처럼 깨져 보인다면 십중팔구 인코딩 문제입니다.
+         과거 한국어 자막은 EUC-KR(CP949), 일본어 자막은 Shift-JIS로 저장된 경우가 많은데,
+         요즘 도구들은 UTF-8을 기대하기 때문입니다. 메모장에서 "다른 이름으로 저장 → 인코딩 UTF-8"로 저장하면 해결됩니다.
+         새로 만드는 자막은 항상 UTF-8로 저장하는 것이 안전합니다.</p>
+
+      <h2>다른 자막 형식과의 차이</h2>
+      <ul>
+        <li><strong>SMI (SAMI)</strong> — 과거 한국에서 널리 쓰이던 형식. HTML 비슷한 문법이라 다루기 번거롭고, 해외 도구 호환성이 낮아 지금은 SRT로 변환해 쓰는 추세입니다.</li>
+        <li><strong>VTT (WebVTT)</strong> — 웹 표준 자막 형식. SRT와 거의 같지만 타임스탬프 구분자가 마침표이고, 웹 플레이어(HTML5 video)에서 주로 사용됩니다.</li>
+        <li><strong>ASS/SSA</strong> — 글꼴, 색상, 위치, 효과까지 지정하는 고급 형식. 애니메이션 팬자막에서 주로 사용됩니다.</li>
+      </ul>
+      <p>특별한 이유가 없다면 SRT로 만들어 두는 것이 가장 호환성이 좋습니다.</p>
+
+      <h2>SRT 파일 만들기와 번역</h2>
+      <p>SRT를 직접 타이핑으로 만드는 건 고된 작업입니다. 영상이 있다면 <a href="/guide/extract-subtitles">AI로 자막을 추출</a>하는 것이
+         현실적이고, 이미 외국어 SRT가 있다면 <a href="/guide/translate-srt">AI 번역</a>으로 한글화할 수 있습니다.
+         <a href="/">자막공방</a>에서는 두 작업 모두 브라우저에서 바로 처리할 수 있습니다 —
+         영상을 올리면 추출+번역을, SRT를 올리면 번역만 수행합니다.</p>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <nav aria-label="푸터 메뉴">
+      <a href="/">자막 추출·번역</a>
+      <a href="/guide/">가이드</a>
+      <a href="/about">사이트 소개</a>
+      <a href="/privacy">개인정보처리방침</a>
+      <a href="/terms">이용약관</a>
+    </nav>
+    <div>© 2026 자막공방</div>
+  </footer>
+</body>
+</html>

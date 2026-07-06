@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>MakeSubtitles — Extract &amp; Translate Video Subtitles Online (Free AI Tool)</title>
+  <meta name="description" content="Upload a video or audio file and get SRT subtitles extracted by Whisper AI, then translated naturally by Claude AI. Your files never leave your browser — a privacy-first, free online subtitle tool." />
+  <meta name="keywords" content="extract subtitles from video, translate srt file, subtitle generator, whisper ai subtitles, srt translator, auto subtitles online" />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://makesubtitles.com/en/" />
+  <link rel="alternate" hreflang="ko" href="https://makesubtitles.com/" />
+  <link rel="alternate" hreflang="en" href="https://makesubtitles.com/en/" />
+  <link rel="alternate" hreflang="x-default" href="https://makesubtitles.com/" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="MakeSubtitles" />
+  <meta property="og:title" content="MakeSubtitles — Extract & Translate Video Subtitles Online" />
+  <meta property="og:description" content="Extract subtitles from video with Whisper AI and translate them with Claude AI. Files are processed in your browser." />
+  <meta property="og:url" content="https://makesubtitles.com/en/" />
+  <meta property="og:locale" content="en_US" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="MakeSubtitles — Extract & Translate Video Subtitles Online" />
+  <meta name="twitter:description" content="Extract subtitles from video with Whisper AI and translate them with Claude AI. Files are processed in your browser." />
+
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8450746629673540"
+     crossorigin="anonymous"></script>
+
+  <link rel="stylesheet" href="/style.css" />
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "MakeSubtitles",
+    "url": "https://makesubtitles.com/en/",
+    "applicationCategory": "MultimediaApplication",
+    "operatingSystem": "Web",
+    "inLanguage": "en",
+    "description": "Extract subtitles from video/audio with Whisper AI and translate them with Claude AI, saved as SRT. Files never leave your browser.",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  }
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="/en/">MakeSubtitles<span class="dot">.</span></a>
+      <nav class="site-nav" aria-label="Main menu">
+        <a href="/en/" class="current">Subtitle Tool</a>
+        <a href="/about">About</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href="/">한국어</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="hero">
+    <h1>Extract &amp; Translate Video Subtitles</h1>
+    <p>Upload a video or audio file — Whisper AI extracts the subtitles and Claude AI translates them into natural language, saved as SRT files.
+       <strong>Your files are processed inside your browser and never uploaded to a server.</strong></p>
+  </section>
+
+  <main class="container">
+    <!-- ===== Tool area — do not rename ids/classes used by app.js ===== -->
+
+    <section class="panel" aria-labelledby="keys-h">
+      <h2 id="keys-h">1. API Keys <span class="meta">(stored only in your browser)</span></h2>
+      <div class="grid2">
+        <label>
+          Groq API key <span class="meta">— for extraction · <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer noopener">console.groq.com/keys</a> (free tier available)</span>
+          <input type="password" id="groqKey" placeholder="gsk_..." autocomplete="off" spellcheck="false" />
+        </label>
+        <label>
+          Anthropic API key <span class="meta">— for translation · <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a></span>
+          <input type="password" id="anthropicKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+        </label>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="settings-h">
+      <h2 id="settings-h">2. Settings</h2>
+      <div class="grid4">
+        <label>
+          Source language
+          <select id="sourceLang">
+            <option value="ja" selected>Japanese</option>
+            <option value="ko">Korean</option>
+            <option value="en">English</option>
+            <option value="zh">Chinese</option>
+            <option value="">Auto detect</option>
+          </select>
+        </label>
+        <label>
+          Target language
+          <select id="targetLang">
+            <option value="en" selected>English</option>
+            <option value="ko">Korean</option>
+            <option value="ja">Japanese</option>
+          </select>
+        </label>
+        <label>
+          Translation model
+          <select id="model">
+            <option value="claude-haiku-4-5" selected>Haiku 4.5 — fast &amp; cheap (recommended)</option>
+            <option value="claude-sonnet-4-6">Sonnet 4.6 — balanced</option>
+            <option value="claude-opus-4-8">Opus 4.8 — highest quality</option>
+          </select>
+        </label>
+        <label class="checkline">
+          <span>Options</span>
+          <span class="checks">
+            <label><input type="checkbox" id="skipTranslate" /> Extract only (no translation)</label>
+            <label><input type="checkbox" id="renameKorean" checked /> Translate file name</label>
+          </span>
+        </label>
+      </div>
+      <details>
+        <summary>Tone / Glossary (optional)</summary>
+        <div class="grid2">
+          <label>
+            Tone instructions
+            <textarea id="styleGuide" rows="3" spellcheck="false" placeholder="e.g. Keep a casual conversational tone / Use formal speech"></textarea>
+          </label>
+          <label>
+            Glossary <span class="meta">(one per line, source = translation)</span>
+            <textarea id="glossary" rows="3" spellcheck="false" placeholder="源氏名 = stage name&#10;お兄ちゃん = big brother"></textarea>
+          </label>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel" aria-labelledby="file-h">
+      <h2 id="file-h">3. File</h2>
+      <div id="dropZone" class="drop-zone">
+        <strong>Drag a video / audio / SRT file here, or click to select</strong>
+        <span class="meta">mp4 · mkv · webm · avi · mp3 · m4a · wav · ogg · srt — upload an SRT to translate only</span>
+        <input type="file" id="fileInput" accept="video/*,audio/*,.srt,.vtt,.mkv,.avi" hidden />
+      </div>
+      <div id="fileInfo" class="meta hidden"></div>
+      <div class="actions">
+        <button id="startBtn" class="primary" disabled>Start</button>
+        <button id="cancelBtn" class="hidden">Stop</button>
+      </div>
+    </section>
+
+    <section class="panel hidden" id="progressPanel" aria-labelledby="progress-h">
+      <h2 id="progress-h">Progress</h2>
+      <ol class="steps" id="steps">
+        <li data-step="audio">Audio extraction <span class="step-status"></span></li>
+        <li data-step="stt">Subtitle extraction (Whisper) <span class="step-status"></span></li>
+        <li data-step="filter">Hallucination filter <span class="step-status"></span></li>
+        <li data-step="translate">Translation (Claude) <span class="step-status"></span></li>
+      </ol>
+      <div class="progress"><div id="progressBar"></div></div>
+      <div id="statusLine" class="meta"></div>
+    </section>
+
+    <div id="errorBanner" class="error-banner hidden"></div>
+
+    <section class="panel hidden" id="resultPanel" aria-labelledby="result-h">
+      <h2 id="result-h">Result</h2>
+      <div id="resultStats" class="meta"></div>
+      <div class="actions">
+        <button id="downloadOriginalBtn">Download original SRT</button>
+        <button id="downloadTranslatedBtn" class="primary">Download translated SRT</button>
+      </div>
+      <details>
+        <summary>Preview</summary>
+        <pre id="preview"></pre>
+      </details>
+    </section>
+
+    <!-- ===== Content ===== -->
+
+    <section class="content-section" aria-labelledby="features-h">
+      <h2 id="features-h">Features</h2>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <h3>🔒 Files never leave your browser</h3>
+          <p>Your video is processed entirely on your device. Audio extraction happens locally, so the original file is never uploaded anywhere.</p>
+        </article>
+        <article class="feature-card">
+          <h3>🎙️ Accurate speech recognition</h3>
+          <p>Powered by Whisper large-v3-turbo, a state-of-the-art speech recognition model that transcribes Japanese, English, Chinese and more.</p>
+        </article>
+        <article class="feature-card">
+          <h3>🌏 Context-aware AI translation</h3>
+          <p>Claude AI translates each line while looking at the surrounding dialogue, producing natural conversational subtitles. Tone and glossary controls keep names and speech styles consistent.</p>
+        </article>
+        <article class="feature-card">
+          <h3>🧹 Hallucination filtering</h3>
+          <p>Fake lines that speech models invent during silence ("Thanks for watching", repeated sentences) are removed automatically.</p>
+        </article>
+        <article class="feature-card">
+          <h3>📄 SRT translation support</h3>
+          <p>Already have subtitles? Upload an SRT file to translate it directly. Failed lines are clearly marked so you can review them later.</p>
+        </article>
+        <article class="feature-card">
+          <h3>💰 Pay only for what you use</h3>
+          <p>The site is free — AI calls run on your own API keys. A one-hour video typically costs only a few cents to process.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="content-section" aria-labelledby="howto-h">
+      <h2 id="howto-h">How to use</h2>
+      <ol class="howto-list">
+        <li><strong>Get API keys</strong> — a Groq key (free tier) for extraction and an Anthropic key for translation. Keys are stored only in your browser.</li>
+        <li><strong>Pick languages and a model</strong> — choose the source language, target language, and translation quality. Haiku is usually enough for subtitles.</li>
+        <li><strong>Upload a file</strong> — drag in a video, audio, or SRT file and press Start.</li>
+        <li><strong>Download SRT</strong> — grab both the original and translated subtitles. Name the SRT after your video file and most players will load it automatically.</li>
+      </ol>
+    </section>
+
+    <section class="content-section" aria-labelledby="faq-h">
+      <h2 id="faq-h">FAQ</h2>
+      <div class="faq-list">
+        <details>
+          <summary>Is my video uploaded to a server?</summary>
+          <p>No. The video is processed inside your browser. Only the extracted audio is sent to Groq for transcription, and the subtitle text is sent to Anthropic for translation. The original video never leaves your device.</p>
+        </details>
+        <details>
+          <summary>Are my API keys safe?</summary>
+          <p>Keys are stored only in your browser's localStorage and are never sent to any server other than Groq/Anthropic themselves. On shared computers, clear the site data after use.</p>
+        </details>
+        <details>
+          <summary>How much does it cost?</summary>
+          <p>The site is free. AI usage runs on your own API keys — Groq has a free tier, and translating an hour of subtitles with Claude Haiku typically costs a few cents.</p>
+        </details>
+        <details>
+          <summary>What file formats are supported?</summary>
+          <p>Video: MP4, MKV, WebM, AVI and more. Audio: MP3, M4A, WAV, OGG. You can also upload an existing SRT file to translate it directly.</p>
+        </details>
+        <details>
+          <summary>Can it handle long videos?</summary>
+          <p>Yes — long videos are split into 10-minute chunks automatically and the timestamps are stitched back together. Very large files (several GB) may fail due to browser memory limits.</p>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <nav aria-label="Footer menu">
+      <a href="/en/">Subtitle Tool</a>
+      <a href="/about">About</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+      <a href="/">한국어</a>
+    </nav>
+    <div>Files are never uploaded to our servers. Audio goes to Groq (transcription) and text to Anthropic (translation) only.</div>
+    <div>© 2026 MakeSubtitles</div>
+  </footer>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      { "@type": "Question", "name": "Is my video uploaded to a server?", "acceptedAnswer": { "@type": "Answer", "text": "No. The video is processed inside your browser. Only the extracted audio is sent to Groq for transcription, and the subtitle text is sent to Anthropic for translation." } },
+      { "@type": "Question", "name": "Are my API keys safe?", "acceptedAnswer": { "@type": "Answer", "text": "Keys are stored only in your browser's localStorage and are never sent anywhere other than Groq/Anthropic." } },
+      { "@type": "Question", "name": "How much does it cost?", "acceptedAnswer": { "@type": "Answer", "text": "The site is free. AI usage runs on your own API keys — a one-hour video typically costs a few cents with Claude Haiku." } },
+      { "@type": "Question", "name": "What file formats are supported?", "acceptedAnswer": { "@type": "Answer", "text": "MP4, MKV, WebM, AVI video; MP3, M4A, WAV, OGG audio; and SRT subtitle files for direct translation." } }
+    ]
+  }
+  </script>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

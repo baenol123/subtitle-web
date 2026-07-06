@@ -19,7 +19,92 @@ const CONTEXT_WINDOW = 3;       // 앞뒤 참고 블록 수
 const MAX_REPEAT = 2;           // 같은 문장 연속 반복 허용 횟수
 const AUDIO_DIRECT_EXTS = ['.mp3', '.m4a', '.wav', '.ogg', '.opus', '.flac', '.webm'];
 const SUBTITLE_EXTS = ['.srt', '.vtt'];
-const MANUAL_MARKER = '[❗수동번역필요]';
+
+// ─────────────────────────────────────────────────────────────
+// 다국어 문자열 — 페이지의 <html lang="..">에 따라 선택된다
+// ─────────────────────────────────────────────────────────────
+
+const STRINGS = {
+  ko: {
+    manualMarker: '[❗수동번역필요]',
+    cancelled: '사용자가 중지했습니다.',
+    ffmpegLoading: 'ffmpeg 로딩 중 (~30MB, 최초 1회)...',
+    ffmpegTimeout: 'ffmpeg 로딩 시간 초과 (3분). 네트워크 상태를 확인하고 새로고침 후 다시 시도해주세요.',
+    fileTooBig: '파일이 너무 큽니다 (1.2GB 초과). 더 작은 파일로 시도해주세요.',
+    extractProgress: (p) => `오디오 추출 중... ${p}%`,
+    extractFailed: (code, log) => `오디오 추출 실패 (ffmpeg exit ${code})\n${log}`,
+    noAudioTrack: '오디오 트랙을 찾지 못했습니다. 영상에 소리가 있는지 확인해주세요.',
+    groqRateWait: (w, i, t) => `Groq 사용량 제한 — ${w}초 대기 후 재시도 (${i}/${t})`,
+    groqError: (s, b) => `Groq API 오류 (${s}): ${b}`,
+    srtParseError: 'SRT에서 자막 블록을 찾지 못했습니다.',
+    refusal: '모델이 이 배치의 번역을 거부했습니다.',
+    anthropicRateWait: (w) => `Anthropic 사용량 제한 — ${w}초 대기 후 재시도`,
+    noTranslationInResponse: '응답에 번역이 없습니다.',
+    translating: (done, total) => `번역 중... ${done}/${total} 블록`,
+    translatingFilename: '파일명 번역 중...',
+    subtitleKind: '자막 파일 → 번역만 수행',
+    mediaKind: '영상/오디오 → 추출 + 번역',
+    needGroqKey: '자막 추출에는 Groq API 키가 필요합니다.',
+    needAnthropicKey: '번역에는 Anthropic API 키가 필요합니다.',
+    nothingToDo: 'SRT 파일 + "추출만" 조합은 할 일이 없습니다.',
+    noSubtitles: '추출된 자막이 없습니다. 음성이 있는 파일인지 확인해주세요.',
+    chunkProgress: (i, n) => `자막 추출 중... 조각 ${i}/${n}`,
+    chunksLabel: (n) => `${n}개 조각`,
+    segmentsLabel: (n) => `${n}개 세그먼트`,
+    removedLabel: (n) => `${n}건 제거`,
+    noIssues: '이상 없음',
+    manualNeeded: (n) => `${n}개 블록 수동 확인 필요`,
+    done: '완료',
+    aborted: '중단됨',
+    stopping: '중지하는 중...',
+    statsBlocks: (n) => `자막 ${n}개`,
+    statsRemoved: (n) => `환각 ${n}건 제거`,
+    statsFailed: (n, m) => `⚠️ ${n}개 블록은 "${m}" 마커로 표시됨`,
+    statsFilename: (name) => `번역 파일명: ${name}.srt`,
+    partialFail: (msg) => `일부 블록 번역 실패 — 마지막 오류: ${msg}`,
+  },
+  en: {
+    manualMarker: '[❗NEEDS MANUAL TRANSLATION]',
+    cancelled: 'Cancelled by user.',
+    ffmpegLoading: 'Loading ffmpeg (~30MB, first run only)...',
+    ffmpegTimeout: 'ffmpeg loading timed out (3 min). Check your network and refresh to try again.',
+    fileTooBig: 'File is too large (over 1.2GB). Please try a smaller file.',
+    extractProgress: (p) => `Extracting audio... ${p}%`,
+    extractFailed: (code, log) => `Audio extraction failed (ffmpeg exit ${code})\n${log}`,
+    noAudioTrack: 'No audio track found. Please check that the video has sound.',
+    groqRateWait: (w, i, t) => `Groq rate limit — retrying in ${w}s (${i}/${t})`,
+    groqError: (s, b) => `Groq API error (${s}): ${b}`,
+    srtParseError: 'No subtitle blocks found in the SRT file.',
+    refusal: 'The model declined to translate this batch.',
+    anthropicRateWait: (w) => `Anthropic rate limit — retrying in ${w}s`,
+    noTranslationInResponse: 'No translation in the response.',
+    translating: (done, total) => `Translating... ${done}/${total} blocks`,
+    translatingFilename: 'Translating file name...',
+    subtitleKind: 'subtitle file → translate only',
+    mediaKind: 'video/audio → extract + translate',
+    needGroqKey: 'A Groq API key is required for subtitle extraction.',
+    needAnthropicKey: 'An Anthropic API key is required for translation.',
+    nothingToDo: 'SRT file + "extract only" leaves nothing to do.',
+    noSubtitles: 'No subtitles were extracted. Please check that the file contains speech.',
+    chunkProgress: (i, n) => `Extracting subtitles... chunk ${i}/${n}`,
+    chunksLabel: (n) => `${n} chunk(s)`,
+    segmentsLabel: (n) => `${n} segment(s)`,
+    removedLabel: (n) => `${n} removed`,
+    noIssues: 'clean',
+    manualNeeded: (n) => `${n} block(s) need manual review`,
+    done: 'Done',
+    aborted: 'Aborted',
+    stopping: 'Stopping...',
+    statsBlocks: (n) => `${n} subtitles`,
+    statsRemoved: (n) => `${n} hallucinations removed`,
+    statsFailed: (n, m) => `⚠️ ${n} block(s) marked with "${m}"`,
+    statsFilename: (name) => `Translated file name: ${name}.srt`,
+    partialFail: (msg) => `Some blocks failed to translate — last error: ${msg}`,
+  },
+};
+
+const T = document.documentElement.lang === 'en' ? STRINGS.en : STRINGS.ko;
+const MANUAL_MARKER = T.manualMarker;
 
 // 자막에 포함되기만 해도 제거 (길고 명확한 문구만)
 const HALLU_SUBSTR = [
@@ -125,7 +210,7 @@ function showError(message) {
 }
 
 function checkCancelled() {
-  if (cancelled) throw new Error('사용자가 중지했습니다.');
+  if (cancelled) throw new Error(T.cancelled);
 }
 
 function sleep(ms) {
@@ -133,7 +218,7 @@ function sleep(ms) {
     const timer = setTimeout(resolve, ms);
     abortController?.signal.addEventListener('abort', () => {
       clearTimeout(timer);
-      reject(new Error('사용자가 중지했습니다.'));
+      reject(new Error(T.cancelled));
     }, { once: true });
   });
 }
@@ -151,7 +236,7 @@ function handleFile(file) {
   if (running) return;
   selectedFile = file;
   const mb = (file.size / 1e6).toFixed(1);
-  const kind = SUBTITLE_EXTS.includes(fileExt(file.name)) ? '자막 파일 → 번역만 수행' : '영상/오디오 → 추출 + 번역';
+  const kind = SUBTITLE_EXTS.includes(fileExt(file.name)) ? T.subtitleKind : T.mediaKind;
   els.fileInfo.textContent = `${file.name} (${mb} MB) — ${kind}`;
   els.fileInfo.classList.remove('hidden');
   els.startBtn.disabled = false;
@@ -175,14 +260,14 @@ els.dropZone.addEventListener('drop', (e) => {
 
 async function loadFFmpeg() {
   if (ffmpeg) return ffmpeg;
-  setStatus('ffmpeg 로딩 중 (~30MB, 최초 1회)...');
+  setStatus(T.ffmpegLoading);
   const instance = new FFmpeg();
   const load = instance.load({
     coreURL: await toBlobURL(`${CORE_ESM}/ffmpeg-core.js`, 'text/javascript'),
     wasmURL: await toBlobURL(`${CORE_ESM}/ffmpeg-core.wasm`, 'application/wasm'),
   });
   const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('ffmpeg 로딩 시간 초과 (3분). 네트워크 상태를 확인하고 새로고침 후 다시 시도해주세요.')), 180000)
+    setTimeout(() => reject(new Error(T.ffmpegTimeout)), 180000)
   );
   await Promise.race([load, timeout]);
   ffmpeg = instance;
@@ -208,7 +293,7 @@ async function extractAudioChunks(file) {
   };
   const onProgress = ({ progress }) => {
     setProgress(progress);
-    setStatus(`오디오 추출 중... ${Math.round(progress * 100)}%`);
+    setStatus(T.extractProgress(Math.round(progress * 100)));
   };
   ff.on('log', onLog);
   ff.on('progress', onProgress);
@@ -226,7 +311,7 @@ async function extractAudioChunks(file) {
     } catch {
       // 마운트 실패 시 메모리에 직접 기록 (큰 파일은 실패할 수 있음)
       if (file.size > 1.2e9) {
-        throw new Error('파일이 너무 큽니다 (1.2GB 초과). 더 작은 파일로 시도해주세요.');
+        throw new Error(T.fileTooBig);
       }
       await ff.writeFile(safeName, new Uint8Array(await file.arrayBuffer()));
       wrote = true;
@@ -243,12 +328,12 @@ async function extractAudioChunks(file) {
       'out_%03d.mp3',
     ]);
     if (code !== 0) {
-      throw new Error(`오디오 추출 실패 (ffmpeg exit ${code})\n${logTail.slice(-5).join('\n')}`);
+      throw new Error(T.extractFailed(code, logTail.slice(-5).join('\n')));
     }
 
     const nodes = await ff.listDir('/');
     const names = nodes.map((n) => n.name).filter((n) => /^out_\d+\.mp3$/.test(n)).sort();
-    if (names.length === 0) throw new Error('오디오 트랙을 찾지 못했습니다. 영상에 소리가 있는지 확인해주세요.');
+    if (names.length === 0) throw new Error(T.noAudioTrack);
 
     const chunks = [];
     for (const [i, name] of names.entries()) {
@@ -290,13 +375,13 @@ async function transcribeChunk(blob, offset, chunkIndex, chunkTotal) {
 
     if (res.status === 429 && attempt <= 5) {
       const wait = Number(res.headers.get('retry-after')) || 15;
-      setStatus(`Groq 사용량 제한 — ${wait}초 대기 후 재시도 (${chunkIndex}/${chunkTotal})`);
+      setStatus(T.groqRateWait(wait, chunkIndex, chunkTotal));
       await sleep(wait * 1000);
       continue;
     }
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new Error(`Groq API 오류 (${res.status}): ${body.slice(0, 300)}`);
+      throw new Error(T.groqError(res.status, body.slice(0, 300)));
     }
 
     const data = await res.json();
@@ -376,7 +461,7 @@ function parseSrt(raw) {
     if (!text) continue;
     blocks.push({ timestamp: lines[tsIndex].trim(), text });
   }
-  if (blocks.length === 0) throw new Error('SRT에서 자막 블록을 찾지 못했습니다.');
+  if (blocks.length === 0) throw new Error(T.srtParseError);
   return blocks;
 }
 
@@ -462,7 +547,7 @@ async function callClaude(client, prompt) {
       }
       const message = await client.messages.create(body, { signal: abortController.signal });
       if (message.stop_reason === 'refusal') {
-        throw new Error('모델이 이 배치의 번역을 거부했습니다.');
+        throw new Error(T.refusal);
       }
       const text = message.content.find((b) => b.type === 'text')?.text ?? '';
       return JSON.parse(extractJsonPayload(text));
@@ -474,7 +559,7 @@ async function callClaude(client, prompt) {
       }
       if (err instanceof Anthropic.RateLimitError && attempt <= 3) {
         const wait = Number(err.headers?.get?.('retry-after')) || 30;
-        setStatus(`Anthropic 사용량 제한 — ${wait}초 대기 후 재시도`);
+        setStatus(T.anthropicRateWait(wait));
         await sleep(wait * 1000);
         continue;
       }
@@ -492,7 +577,7 @@ async function translateBatchWithSplit(client, batch, opts) {
       const translation = byId.get(b.id);
       return translation !== undefined
         ? { id: b.id, translation: translation.trim() }
-        : { id: b.id, error: '응답에 번역이 없습니다.' };
+        : { id: b.id, error: T.noTranslationInResponse };
     });
   } catch (err) {
     if (cancelled || isFatalApiError(err)) throw err;
@@ -523,7 +608,7 @@ async function translateBlocks(client, blocks) {
     const firstId = batch[0].id;
     const lastId = batch[batch.length - 1].id;
 
-    setStatus(`번역 중... ${Math.min(offset + BATCH_SIZE, items.length)}/${items.length} 블록`);
+    setStatus(T.translating(Math.min(offset + BATCH_SIZE, items.length), items.length));
     setProgress(offset / items.length);
 
     const results = await translateBatchWithSplit(client, batch, {
@@ -599,15 +684,15 @@ async function run() {
   const skipTranslate = els.skipTranslate.checked;
 
   if (!isSubtitle && !els.groqKey.value.trim()) {
-    showError('자막 추출에는 Groq API 키가 필요합니다.');
+    showError(T.needGroqKey);
     return;
   }
   if (!skipTranslate && !els.anthropicKey.value.trim()) {
-    showError('번역에는 Anthropic API 키가 필요합니다.');
+    showError(T.needAnthropicKey);
     return;
   }
   if (isSubtitle && skipTranslate) {
-    showError('SRT 파일 + "추출만" 조합은 할 일이 없습니다.');
+    showError(T.nothingToDo);
     return;
   }
 
@@ -637,26 +722,26 @@ async function run() {
       // 1. 오디오 추출
       setStep('audio', 'active');
       const chunks = await extractAudioChunks(selectedFile);
-      setStep('audio', 'done', `${chunks.length}개 조각`);
+      setStep('audio', 'done', T.chunksLabel(chunks.length));
       checkCancelled();
 
       // 2. Whisper 자막 추출
       setStep('stt', 'active');
       const segments = [];
       for (const [i, chunk] of chunks.entries()) {
-        setStatus(`자막 추출 중... 조각 ${i + 1}/${chunks.length}`);
+        setStatus(T.chunkProgress(i + 1, chunks.length));
         setProgress(i / chunks.length);
         segments.push(...await transcribeChunk(chunk.blob, chunk.offset, i + 1, chunks.length));
       }
-      setStep('stt', 'done', `${segments.length}개 세그먼트`);
+      setStep('stt', 'done', T.segmentsLabel(segments.length));
       checkCancelled();
 
       // 3. 환각 필터
       setStep('filter', 'active');
       const { kept, removed } = filterHallucinations(segments);
       removedCount = removed;
-      setStep('filter', 'done', removed > 0 ? `${removed}건 제거` : '이상 없음');
-      if (kept.length === 0) throw new Error('추출된 자막이 없습니다. 음성이 있는 파일인지 확인해주세요.');
+      setStep('filter', 'done', removed > 0 ? T.removedLabel(removed) : T.noIssues);
+      if (kept.length === 0) throw new Error(T.noSubtitles);
 
       blocks = segmentsToBlocks(kept);
       results.originalSrt = buildSrt(blocks);
@@ -676,25 +761,25 @@ async function run() {
       results.translatedSrt = buildSrt(translation.blocks);
 
       if (els.renameKorean.checked) {
-        setStatus('파일명 번역 중...');
+        setStatus(T.translatingFilename);
         const koreanName = await translateFileName(client, baseName);
         if (koreanName && koreanName !== baseName) results.translatedName = koreanName;
       }
-      setStep('translate', 'done', failed > 0 ? `${failed}개 블록 수동 확인 필요` : '완료');
+      setStep('translate', 'done', failed > 0 ? T.manualNeeded(failed) : T.done);
     }
 
     // 결과 표시
     setProgress(1);
-    setStatus('완료');
+    setStatus(T.done);
     const stats = [
-      `자막 ${blocks.length}개`,
-      removedCount > 0 ? `환각 ${removedCount}건 제거` : '',
-      failed > 0 ? `⚠️ ${failed}개 블록은 "${MANUAL_MARKER}" 마커로 표시됨` : '',
-      results.translatedName !== baseName ? `번역 파일명: ${results.translatedName}.srt` : '',
+      T.statsBlocks(blocks.length),
+      removedCount > 0 ? T.statsRemoved(removedCount) : '',
+      failed > 0 ? T.statsFailed(failed, MANUAL_MARKER) : '',
+      results.translatedName !== baseName ? T.statsFilename(results.translatedName) : '',
     ].filter(Boolean).join(' · ');
     els.resultStats.textContent = stats;
     if (failed > 0 && translateError) {
-      showError(`일부 블록 번역 실패 — 마지막 오류: ${translateError.slice(0, 400)}`);
+      showError(T.partialFail(translateError.slice(0, 400)));
     }
     els.downloadOriginalBtn.disabled = !results.originalSrt;
     els.downloadTranslatedBtn.disabled = !results.translatedSrt;
@@ -704,7 +789,7 @@ async function run() {
   } catch (err) {
     console.error(err);
     showError(err instanceof Error ? err.message : String(err));
-    setStatus('중단됨');
+    setStatus(T.aborted);
   } finally {
     running = false;
     els.startBtn.disabled = false;
@@ -716,5 +801,5 @@ els.startBtn.addEventListener('click', () => { if (selectedFile && !running) run
 els.cancelBtn.addEventListener('click', () => {
   cancelled = true;
   abortController?.abort();
-  setStatus('중지하는 중...');
+  setStatus(T.stopping);
 });
