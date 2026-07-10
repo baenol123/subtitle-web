@@ -84,21 +84,11 @@
       <div class="grid4">
         <label>
           Source language
-          <select id="sourceLang">
-            <option value="ja" selected>Japanese</option>
-            <option value="ko">Korean</option>
-            <option value="en">English</option>
-            <option value="zh">Chinese</option>
-            <option value="">Auto detect</option>
-          </select>
+          <select id="sourceLang"><!-- populated by app.js with all Whisper languages --></select>
         </label>
         <label>
           Target language
-          <select id="targetLang">
-            <option value="en" selected>English</option>
-            <option value="ko">Korean</option>
-            <option value="ja">Japanese</option>
-          </select>
+          <select id="targetLang"><!-- populated by app.js --></select>
         </label>
         <label>
           Translation model

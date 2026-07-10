@@ -94,21 +94,11 @@
       <div class="grid4">
         <label>
           원본 언어
-          <select id="sourceLang">
-            <option value="ja" selected>일본어</option>
-            <option value="ko">한국어</option>
-            <option value="en">영어</option>
-            <option value="zh">중국어</option>
-            <option value="">자동 감지</option>
-          </select>
+          <select id="sourceLang"><!-- app.js가 Whisper 지원 언어 전체를 채움 --></select>
         </label>
         <label>
           번역 언어
-          <select id="targetLang">
-            <option value="ko" selected>한국어</option>
-            <option value="en">영어</option>
-            <option value="ja">일본어</option>
-          </select>
+          <select id="targetLang"><!-- app.js가 채움 --></select>
         </label>
         <label>
           번역 모델
@@ -122,7 +112,7 @@
           <span>옵션</span>
           <span class="checks">
             <label><input type="checkbox" id="skipTranslate" /> 추출만 (번역 안 함)</label>
-            <label><input type="checkbox" id="renameKorean" checked /> 파일명 한글화</label>
+            <label><input type="checkbox" id="renameKorean" checked /> 파일명 번역</label>
           </span>
         </label>
       </div>

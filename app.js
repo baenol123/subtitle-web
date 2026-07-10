@@ -135,7 +135,54 @@ const HALLU_SUBSTR = [
 // 자막 전체가 정확히 일치할 때만 제거 (짧아서 오탐 위험이 있는 문구)
 const HALLU_EXACT = ['字幕by', '字幕制作', '提供:', 'by H'];
 
-const LANG_LABELS = { ja: 'Japanese', ko: 'Korean', en: 'English', zh: 'Chinese', '': 'the source language' };
+// Whisper가 지원하는 전체 언어 — [코드, 영어 이름, 한국어 이름]
+// 원본 언어(Whisper language 파라미터)와 번역 언어(Claude) 양쪽에 사용된다.
+const WHISPER_LANGUAGES = [
+  ['af', 'Afrikaans', '아프리칸스어'], ['am', 'Amharic', '암하라어'], ['ar', 'Arabic', '아랍어'],
+  ['as', 'Assamese', '아삼어'], ['az', 'Azerbaijani', '아제르바이잔어'], ['ba', 'Bashkir', '바시키르어'],
+  ['be', 'Belarusian', '벨라루스어'], ['bg', 'Bulgarian', '불가리아어'], ['bn', 'Bengali', '벵골어'],
+  ['bo', 'Tibetan', '티베트어'], ['br', 'Breton', '브르타뉴어'], ['bs', 'Bosnian', '보스니아어'],
+  ['ca', 'Catalan', '카탈루냐어'], ['cs', 'Czech', '체코어'], ['cy', 'Welsh', '웨일스어'],
+  ['da', 'Danish', '덴마크어'], ['de', 'German', '독일어'], ['el', 'Greek', '그리스어'],
+  ['en', 'English', '영어'], ['es', 'Spanish', '스페인어'], ['et', 'Estonian', '에스토니아어'],
+  ['eu', 'Basque', '바스크어'], ['fa', 'Persian', '페르시아어'], ['fi', 'Finnish', '핀란드어'],
+  ['fo', 'Faroese', '페로어'], ['fr', 'French', '프랑스어'], ['gl', 'Galician', '갈리시아어'],
+  ['gu', 'Gujarati', '구자라트어'], ['ha', 'Hausa', '하우사어'], ['haw', 'Hawaiian', '하와이어'],
+  ['he', 'Hebrew', '히브리어'], ['hi', 'Hindi', '힌디어'], ['hr', 'Croatian', '크로아티아어'],
+  ['ht', 'Haitian Creole', '아이티 크리올어'], ['hu', 'Hungarian', '헝가리어'], ['hy', 'Armenian', '아르메니아어'],
+  ['id', 'Indonesian', '인도네시아어'], ['is', 'Icelandic', '아이슬란드어'], ['it', 'Italian', '이탈리아어'],
+  ['ja', 'Japanese', '일본어'], ['jw', 'Javanese', '자바어'], ['ka', 'Georgian', '조지아어'],
+  ['kk', 'Kazakh', '카자흐어'], ['km', 'Khmer', '크메르어'], ['kn', 'Kannada', '칸나다어'],
+  ['ko', 'Korean', '한국어'], ['la', 'Latin', '라틴어'], ['lb', 'Luxembourgish', '룩셈부르크어'],
+  ['ln', 'Lingala', '링갈라어'], ['lo', 'Lao', '라오어'], ['lt', 'Lithuanian', '리투아니아어'],
+  ['lv', 'Latvian', '라트비아어'], ['mg', 'Malagasy', '말라가시어'], ['mi', 'Maori', '마오리어'],
+  ['mk', 'Macedonian', '마케도니아어'], ['ml', 'Malayalam', '말라얄람어'], ['mn', 'Mongolian', '몽골어'],
+  ['mr', 'Marathi', '마라티어'], ['ms', 'Malay', '말레이어'], ['mt', 'Maltese', '몰타어'],
+  ['my', 'Burmese', '미얀마어'], ['ne', 'Nepali', '네팔어'], ['nl', 'Dutch', '네덜란드어'],
+  ['nn', 'Norwegian Nynorsk', '노르웨이어(뉘노르스크)'], ['no', 'Norwegian', '노르웨이어'],
+  ['oc', 'Occitan', '오크어'], ['pa', 'Punjabi', '펀자브어'], ['pl', 'Polish', '폴란드어'],
+  ['ps', 'Pashto', '파슈토어'], ['pt', 'Portuguese', '포르투갈어'], ['ro', 'Romanian', '루마니아어'],
+  ['ru', 'Russian', '러시아어'], ['sa', 'Sanskrit', '산스크리트어'], ['sd', 'Sindhi', '신드어'],
+  ['si', 'Sinhala', '싱할라어'], ['sk', 'Slovak', '슬로바키아어'], ['sl', 'Slovenian', '슬로베니아어'],
+  ['sn', 'Shona', '쇼나어'], ['so', 'Somali', '소말리어'], ['sq', 'Albanian', '알바니아어'],
+  ['sr', 'Serbian', '세르비아어'], ['su', 'Sundanese', '순다어'], ['sv', 'Swedish', '스웨덴어'],
+  ['sw', 'Swahili', '스와힐리어'], ['ta', 'Tamil', '타밀어'], ['te', 'Telugu', '텔루구어'],
+  ['tg', 'Tajik', '타지크어'], ['th', 'Thai', '태국어'], ['tk', 'Turkmen', '투르크멘어'],
+  ['tl', 'Tagalog', '타갈로그어'], ['tr', 'Turkish', '터키어'], ['tt', 'Tatar', '타타르어'],
+  ['uk', 'Ukrainian', '우크라이나어'], ['ur', 'Urdu', '우르두어'], ['uz', 'Uzbek', '우즈베크어'],
+  ['vi', 'Vietnamese', '베트남어'], ['yi', 'Yiddish', '이디시어'], ['yo', 'Yoruba', '요루바어'],
+  ['yue', 'Cantonese', '광둥어'], ['zh', 'Chinese', '중국어'],
+];
+
+// 드롭다운 상단 "주요 언어" 그룹에 올릴 코드
+const POPULAR_CODES = ['ja', 'ko', 'en', 'zh', 'yue', 'es', 'fr', 'de', 'ru', 'pt', 'vi', 'th', 'id'];
+
+// 번역 프롬프트에 넣을 영어 언어명
+function languageLabel(code) {
+  if (!code) return 'the source language';
+  const found = WHISPER_LANGUAGES.find(([c]) => c === code);
+  return found ? found[1] : code;
+}
 
 // 구조화 출력 스키마 — 번역 응답을 항상 유효한 JSON으로 보장
 const TRANSLATION_SCHEMA = {
@@ -177,7 +224,36 @@ const els = {
   resultsList: $('resultsList'), downloadAllBtn: $('downloadAllBtn'),
 };
 
-// 설정 localStorage 저장/복원
+// 언어 드롭다운 채우기 — 페이지 언어에 맞는 이름으로, 주요/전체 그룹 분리
+function populateLanguageSelects() {
+  const uiLang = document.documentElement.lang === 'en' ? 'en' : 'ko';
+  const label = ([, en, ko]) => (uiLang === 'en' ? en : ko);
+  const popular = POPULAR_CODES
+    .map((c) => WHISPER_LANGUAGES.find(([code]) => code === c))
+    .filter(Boolean);
+  const rest = WHISPER_LANGUAGES
+    .filter(([code]) => !POPULAR_CODES.includes(code))
+    .sort((a, b) => label(a).localeCompare(label(b), uiLang));
+
+  const fill = (select, includeAuto) => {
+    select.innerHTML = '';
+    if (includeAuto) select.append(new Option(uiLang === 'en' ? 'Auto detect' : '자동 감지', ''));
+    const g1 = document.createElement('optgroup');
+    g1.label = uiLang === 'en' ? 'Common' : '주요 언어';
+    for (const l of popular) g1.append(new Option(label(l), l[0]));
+    const g2 = document.createElement('optgroup');
+    g2.label = uiLang === 'en' ? 'All languages' : '전체 언어';
+    for (const l of rest) g2.append(new Option(label(l), l[0]));
+    select.append(g1, g2);
+  };
+  fill(els.sourceLang, true);
+  fill(els.targetLang, false);
+  els.sourceLang.value = 'ja';
+  els.targetLang.value = uiLang === 'en' ? 'en' : 'ko';
+}
+populateLanguageSelects();
+
+// 설정 localStorage 저장/복원 (드롭다운을 채운 뒤에 복원해야 저장값이 적용됨)
 const PERSIST = ['groqKey', 'anthropicKey', 'sourceLang', 'targetLang', 'model', 'styleGuide', 'glossary'];
 for (const key of PERSIST) {
   const saved = localStorage.getItem(`subweb-${key}`);
@@ -618,8 +694,8 @@ async function translateBatchWithSplit(client, batch, opts) {
 }
 
 async function translateBlocks(client, blocks) {
-  const sourceLabel = LANG_LABELS[els.sourceLang.value] ?? 'the source language';
-  const targetLabel = LANG_LABELS[els.targetLang.value] ?? 'Korean';
+  const sourceLabel = languageLabel(els.sourceLang.value);
+  const targetLabel = languageLabel(els.targetLang.value);
   const styleGuide = els.styleGuide.value.trim() || undefined;
   const glossary = parseGlossary(els.glossary.value);
 
@@ -665,8 +741,8 @@ async function translateBlocks(client, blocks) {
 async function translateFileName(client, baseName) {
   try {
     const parsed = await callClaude(client, buildBatchPrompt([{ id: 0, text: baseName }], {
-      sourceLabel: LANG_LABELS[els.sourceLang.value] ?? 'the source language',
-      targetLabel: LANG_LABELS[els.targetLang.value] ?? 'Korean',
+      sourceLabel: languageLabel(els.sourceLang.value),
+      targetLabel: languageLabel(els.targetLang.value),
       styleGuide: 'The text is a media file name. Translate it into a natural, concise title. Plain text only — no quotes, no slashes, no file extension.',
     }));
     const name = (parsed.translations?.[0]?.translation ?? '')
