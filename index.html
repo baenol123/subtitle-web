@@ -113,6 +113,7 @@
           <span class="checks">
             <label><input type="checkbox" id="skipTranslate" /> 추출만 (번역 안 함)</label>
             <label><input type="checkbox" id="renameKorean" checked /> 파일명 번역</label>
+            <label><input type="checkbox" id="aiRefine" /> AI 교정 (오인식 보정)</label>
           </span>
         </label>
       </div>
@@ -153,6 +154,7 @@
         <li data-step="audio">오디오 추출 <span class="step-status"></span></li>
         <li data-step="stt">자막 추출 (Whisper) <span class="step-status"></span></li>
         <li data-step="filter">환각 필터 <span class="step-status"></span></li>
+        <li data-step="refine">AI 교정 (선택) <span class="step-status"></span></li>
         <li data-step="translate">번역 (Claude) <span class="step-status"></span></li>
       </ol>
       <div class="progress"><div id="progressBar"></div></div>

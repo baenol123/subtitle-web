@@ -103,6 +103,7 @@
           <span class="checks">
             <label><input type="checkbox" id="skipTranslate" /> Extract only (no translation)</label>
             <label><input type="checkbox" id="renameKorean" checked /> Translate file name</label>
+            <label><input type="checkbox" id="aiRefine" /> AI proofreading (fix mis-recognitions)</label>
           </span>
         </label>
       </div>
@@ -141,6 +142,7 @@
         <li data-step="audio">Audio extraction <span class="step-status"></span></li>
         <li data-step="stt">Subtitle extraction (Whisper) <span class="step-status"></span></li>
         <li data-step="filter">Hallucination filter <span class="step-status"></span></li>
+        <li data-step="refine">AI proofreading (optional) <span class="step-status"></span></li>
         <li data-step="translate">Translation (Claude) <span class="step-status"></span></li>
       </ol>
       <div class="progress"><div id="progressBar"></div></div>
