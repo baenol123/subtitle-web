@@ -1,4 +1,4 @@
-# 자막공방 (MakeSubtitles)
+# 자막공장 (MakeSubtitles)
 
 **https://makesubtitles.com** — 영상 자막 추출 + AI 번역 웹 도구
 
