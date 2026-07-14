@@ -14,8 +14,10 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const GROQ_MODEL = 'whisper-large-v3-turbo';
 
 const CHUNK_SECONDS = 600;      // 10분 단위로 잘라 전송 (Groq 파일 크기 제한 대응)
-const BATCH_SIZE = 20;          // 번역 배치 크기
-const REFINE_BATCH_SIZE = 40;   // 교정 배치 크기 — 고칠 줄만 반환하므로 크게 잡아 요청 수 절감
+const BATCH_SIZE = 20;                // 번역 배치 크기 (Claude)
+const GEMINI_BATCH_SIZE = 50;         // Gemini는 일일 '요청 횟수' 한도가 빡빡해 배치를 크게 잡아 요청 수 절감
+const REFINE_BATCH_SIZE = 40;         // 교정 배치 크기 — 고칠 줄만 반환하므로 크게 잡아도 안전
+const GEMINI_REFINE_BATCH_SIZE = 100;
 const CONTEXT_WINDOW = 3;       // 앞뒤 참고 블록 수
 const MAX_REPEAT = 2;           // 같은 문장 연속 반복 허용 횟수
 const AUDIO_DIRECT_EXTS = ['.mp3', '.m4a', '.wav', '.ogg', '.opus', '.flac', '.webm'];
@@ -915,6 +917,19 @@ async function translateBatchWithSplit(batch, opts) {
     const buildPrompt = opts.refine ? buildRefinePrompt : buildBatchPrompt;
     const parsed = await callModel(buildPrompt(batch.map((b) => ({ id: b.id, text: b.text })), opts));
     const byId = new Map((parsed.translations ?? []).map((t) => [t.id, t.translation]));
+
+    // 큰 배치에서 모델이 일부 줄을 빼먹으면 빠진 줄만 모아 한 번 더 요청
+    // (교정 모드는 '고칠 줄만 반환'이 정상이므로 제외)
+    if (!opts.refine) {
+      const missing = batch.filter((b) => !byId.has(b.id));
+      if (missing.length > 0 && missing.length < batch.length) {
+        const retried = await translateBatchWithSplit(missing, opts);
+        for (const r of retried) {
+          if (r.translation !== undefined) byId.set(r.id, r.translation);
+        }
+      }
+    }
+
     return batch.map((b) => {
       const translation = byId.get(b.id);
       return translation !== undefined
@@ -944,13 +959,14 @@ async function translateBlocks(blocks) {
   let failed = 0;
   let lastError = '';
 
-  for (let offset = 0; offset < items.length; offset += BATCH_SIZE) {
+  const batchSize = isGeminiModel() ? GEMINI_BATCH_SIZE : BATCH_SIZE;
+  for (let offset = 0; offset < items.length; offset += batchSize) {
     checkCancelled();
-    const batch = items.slice(offset, offset + BATCH_SIZE);
+    const batch = items.slice(offset, offset + batchSize);
     const firstId = batch[0].id;
     const lastId = batch[batch.length - 1].id;
 
-    setStatus(T.translating(Math.min(offset + BATCH_SIZE, items.length), items.length));
+    setStatus(T.translating(Math.min(offset + batchSize, items.length), items.length));
     setProgress(offset / items.length);
 
     const results = await translateBatchWithSplit(batch, {
@@ -985,13 +1001,14 @@ async function refineBlocks(blocks) {
   const corrected = new Array(blocks.length);
   let changed = 0;
 
-  for (let offset = 0; offset < items.length; offset += REFINE_BATCH_SIZE) {
+  const batchSize = isGeminiModel() ? GEMINI_REFINE_BATCH_SIZE : REFINE_BATCH_SIZE;
+  for (let offset = 0; offset < items.length; offset += batchSize) {
     checkCancelled();
-    const batch = items.slice(offset, offset + REFINE_BATCH_SIZE);
+    const batch = items.slice(offset, offset + batchSize);
     const firstId = batch[0].id;
     const lastId = batch[batch.length - 1].id;
 
-    setStatus(T.refining(Math.min(offset + REFINE_BATCH_SIZE, items.length), items.length));
+    setStatus(T.refining(Math.min(offset + batchSize, items.length), items.length));
     setProgress(offset / items.length);
 
     const results = await translateBatchWithSplit(batch, {
