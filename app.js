@@ -46,6 +46,8 @@ const STRINGS = {
     refusal: '모델이 이 배치의 번역을 거부했습니다.',
     anthropicRateWait: (w) => `Anthropic 사용량 제한 — ${w}초 대기 후 재시도`,
     geminiRateWait: (w) => `Gemini 사용량 제한 — ${w}초 대기 후 재시도 (무료 티어는 분당 요청 제한이 있습니다)`,
+    geminiKeySwitch: (i, n) => `Gemini 한도 도달 — 예비 키로 전환 (${i}/${n})`,
+    geminiDailyLimit: 'Gemini 무료 일일 한도가 소진되었습니다 (매일 태평양 시간 자정, 한국 시간 오후 4~5시경 초기화). 다른 Google 계정의 예비 키를 추가하거나 모델을 바꾸면 계속할 수 있습니다. 완료된 파일의 결과는 아래에서 받을 수 있습니다.',
     geminiError: (s, b) => `Gemini API 오류 (${s}): ${b}`,
     geminiEmpty: (r) => `Gemini가 응답을 반환하지 않았습니다 (${r})`,
     needGeminiKey: 'Gemini 모델을 선택했습니다 — Google Gemini API 키가 필요합니다.',
@@ -102,6 +104,8 @@ const STRINGS = {
     refusal: 'The model declined to translate this batch.',
     anthropicRateWait: (w) => `Anthropic rate limit — retrying in ${w}s`,
     geminiRateWait: (w) => `Gemini rate limit — retrying in ${w}s (the free tier has per-minute limits)`,
+    geminiKeySwitch: (i, n) => `Gemini limit reached — switching to backup key (${i}/${n})`,
+    geminiDailyLimit: 'Your Gemini free daily quota is exhausted (it resets at midnight Pacific Time). Add a backup key from a different Google account or switch models to continue. Results for completed files are available below.',
     geminiError: (s, b) => `Gemini API error (${s}): ${b}`,
     geminiEmpty: (r) => `Gemini returned no response (${r})`,
     needGeminiKey: 'A Google Gemini API key is required for the selected Gemini model.',
@@ -238,6 +242,7 @@ const $ = (id) => document.getElementById(id);
 const els = {
   groqKey: $('groqKey'), groqKey2: $('groqKey2'), groqKey3: $('groqKey3'),
   anthropicKey: $('anthropicKey'), geminiKey: $('geminiKey'),
+  geminiKey2: $('geminiKey2'), geminiKey3: $('geminiKey3'),
   sourceLang: $('sourceLang'), targetLang: $('targetLang'), model: $('model'),
   skipTranslate: $('skipTranslate'), renameKorean: $('renameKorean'), aiRefine: $('aiRefine'),
   styleGuide: $('styleGuide'), glossary: $('glossary'),
@@ -280,7 +285,7 @@ function populateLanguageSelects() {
 populateLanguageSelects();
 
 // 설정 localStorage 저장/복원 (드롭다운을 채운 뒤에 복원해야 저장값이 적용됨)
-const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'sourceLang', 'targetLang', 'model', 'styleGuide', 'glossary'];
+const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'sourceLang', 'targetLang', 'model', 'styleGuide', 'glossary'];
 for (const key of PERSIST) {
   const saved = localStorage.getItem(`subweb-${key}`);
   if (saved !== null) els[key].value = saved;
@@ -810,11 +815,26 @@ function geminiThinkingConfig(model) {
 // thinking 파라미터가 미래 모델에서 거부되면 자동으로 빼고 재시도
 let geminiThinkingParamOk = true;
 
+// 입력된 Gemini 키 전체 (기본 + 예비). 한도 초과 시 순서대로 전환한다.
+// 무료 한도는 Google 계정 단위이므로 예비 키는 다른 계정에서 발급해야 효과가 있다.
+function geminiKeys() {
+  return [els.geminiKey.value, els.geminiKey2.value, els.geminiKey3.value]
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
+// 세션 동안 유지되는 현재 키 인덱스 — 한도가 끝난 키로 되돌아가지 않도록
+let geminiKeyIndex = 0;
+
 async function callGemini(prompt) {
   const model = els.model.value;
-  const key = els.geminiKey.value.trim();
-  for (let attempt = 1; ; attempt++) {
+  const keys = geminiKeys();
+  let keySwitches = 0;
+  let waits = 0;
+
+  for (;;) {
     checkCancelled();
+    const key = keys[geminiKeyIndex % keys.length];
     const generationConfig = { responseMimeType: 'application/json', temperature: 0.2 };
     const thinking = geminiThinkingParamOk ? geminiThinkingConfig(model) : null;
     if (thinking) generationConfig.thinkingConfig = thinking;
@@ -832,20 +852,43 @@ async function callGemini(prompt) {
       }
     );
 
-    // 무료 티어는 분당 요청 제한이 빡빡해서 429가 정상적으로 발생한다 — 대기 후 재시도
-    if ((res.status === 429 || res.status === 503) && attempt <= 6) {
-      setStatus(T.geminiRateWait(30));
-      await sleep(30000);
-      continue;
-    }
     if (!res.ok) {
       const body = await res.text().catch(() => '');
+
       // thinkingConfig를 거부하는 모델이면 파라미터를 빼고 한 번 더 시도
       if (res.status === 400 && thinking && /thinking/i.test(body)) {
         console.warn('thinkingConfig가 거부되어 제외하고 재시도합니다:', body.slice(0, 200));
         geminiThinkingParamOk = false;
         continue;
       }
+
+      if (res.status === 429 || res.status === 503) {
+        // 예비 키가 남아 있으면 대기 없이 즉시 다음 키로 전환
+        if (keys.length > 1 && keySwitches < keys.length - 1) {
+          geminiKeyIndex = (geminiKeyIndex + 1) % keys.length;
+          keySwitches++;
+          setStatus(T.geminiKeySwitch((geminiKeyIndex % keys.length) + 1, keys.length));
+          continue;
+        }
+
+        // 응답 본문의 quotaId로 일일 한도(PerDay)와 분당 제한(PerMinute)을 구분한다.
+        // 일일 한도는 태평양 시간 자정까지 안 풀리므로 기다리지 않고 즉시 전체 중단.
+        if (res.status === 429 && /per.?day|daily/i.test(body)) {
+          throw new GeminiFatalError(T.geminiDailyLimit);
+        }
+
+        // 분당 제한 — 응답이 알려주는 retryDelay만큼만 대기 (없으면 30초)
+        if (waits < 6) {
+          waits++;
+          keySwitches = 0;
+          const delay = body.match(/retryDelay"\s*:\s*"([\d.]+)s"/);
+          const waitSec = Math.min(Math.max(delay ? Math.ceil(Number(delay[1])) + 1 : 30, 5), 120);
+          setStatus(T.geminiRateWait(waitSec));
+          await sleep(waitSec * 1000);
+          continue;
+        }
+      }
+
       const message = T.geminiError(res.status, body.slice(0, 300));
       if ([400, 401, 403, 404].includes(res.status)) throw new GeminiFatalError(message);
       throw new Error(message);
@@ -1168,7 +1211,7 @@ async function run() {
   const needsLlm = !skipTranslate || (hasMedia && els.aiRefine.checked);
   if (needsLlm) {
     if (isGeminiModel()) {
-      if (!els.geminiKey.value.trim()) {
+      if (geminiKeys().length === 0) {
         showError(T.needGeminiKey);
         return;
       }
