@@ -769,11 +769,26 @@ async function callClaude(prompt) {
   }
 }
 
+// Gemini는 기본적으로 thinking(내부 추론)이 켜져 있고 그 토큰이 출력 요금으로
+// 과금된다. 번역에는 추론이 불필요하므로 모델별 방식으로 최소화/비활성화한다.
+function geminiThinkingConfig(model) {
+  if (model.startsWith('gemini-3')) return { thinkingLevel: 'minimal' }; // 3.x는 완전 비활성 불가 — 최소로
+  if (model === 'gemini-2.5-flash') return { thinkingBudget: 0 };        // 2.5 flash는 예산 0 = 비활성
+  return null; // flash-lite 등은 기본 꺼짐
+}
+
+// thinking 파라미터가 미래 모델에서 거부되면 자동으로 빼고 재시도
+let geminiThinkingParamOk = true;
+
 async function callGemini(prompt) {
   const model = els.model.value;
   const key = els.geminiKey.value.trim();
   for (let attempt = 1; ; attempt++) {
     checkCancelled();
+    const generationConfig = { responseMimeType: 'application/json', temperature: 0.2 };
+    const thinking = geminiThinkingParamOk ? geminiThinkingConfig(model) : null;
+    if (thinking) generationConfig.thinkingConfig = thinking;
+
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
       {
@@ -781,7 +796,7 @@ async function callGemini(prompt) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+          generationConfig,
         }),
         signal: abortController.signal,
       }
@@ -795,6 +810,12 @@ async function callGemini(prompt) {
     }
     if (!res.ok) {
       const body = await res.text().catch(() => '');
+      // thinkingConfig를 거부하는 모델이면 파라미터를 빼고 한 번 더 시도
+      if (res.status === 400 && thinking && /thinking/i.test(body)) {
+        console.warn('thinkingConfig가 거부되어 제외하고 재시도합니다:', body.slice(0, 200));
+        geminiThinkingParamOk = false;
+        continue;
+      }
       const message = T.geminiError(res.status, body.slice(0, 300));
       if ([400, 401, 403, 404].includes(res.status)) throw new GeminiFatalError(message);
       throw new Error(message);
