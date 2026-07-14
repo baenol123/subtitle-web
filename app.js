@@ -35,6 +35,7 @@ const STRINGS = {
     extractFailed: (code, log) => `오디오 추출 실패 (ffmpeg exit ${code})\n${log}`,
     noAudioTrack: '오디오 트랙을 찾지 못했습니다. 영상에 소리가 있는지 확인해주세요.',
     groqRateWait: (w, i, t) => `Groq 사용량 제한 — ${w}초 대기 후 재시도 (${i}/${t})`,
+    groqKeySwitch: (i, n) => `Groq 한도 도달 — 예비 키로 전환 (${i}/${n})`,
     groqError: (s, b) => `Groq API 오류 (${s}): ${b}`,
     srtParseError: 'SRT에서 자막 블록을 찾지 못했습니다.',
     refusal: '모델이 이 배치의 번역을 거부했습니다.',
@@ -86,6 +87,7 @@ const STRINGS = {
     extractFailed: (code, log) => `Audio extraction failed (ffmpeg exit ${code})\n${log}`,
     noAudioTrack: 'No audio track found. Please check that the video has sound.',
     groqRateWait: (w, i, t) => `Groq rate limit — retrying in ${w}s (${i}/${t})`,
+    groqKeySwitch: (i, n) => `Groq limit reached — switching to backup key (${i}/${n})`,
     groqError: (s, b) => `Groq API error (${s}): ${b}`,
     srtParseError: 'No subtitle blocks found in the SRT file.',
     refusal: 'The model declined to translate this batch.',
@@ -225,7 +227,8 @@ const TRANSLATION_SCHEMA = {
 
 const $ = (id) => document.getElementById(id);
 const els = {
-  groqKey: $('groqKey'), anthropicKey: $('anthropicKey'), geminiKey: $('geminiKey'),
+  groqKey: $('groqKey'), groqKey2: $('groqKey2'), groqKey3: $('groqKey3'),
+  anthropicKey: $('anthropicKey'), geminiKey: $('geminiKey'),
   sourceLang: $('sourceLang'), targetLang: $('targetLang'), model: $('model'),
   skipTranslate: $('skipTranslate'), renameKorean: $('renameKorean'), aiRefine: $('aiRefine'),
   styleGuide: $('styleGuide'), glossary: $('glossary'),
@@ -268,7 +271,7 @@ function populateLanguageSelects() {
 populateLanguageSelects();
 
 // 설정 localStorage 저장/복원 (드롭다운을 채운 뒤에 복원해야 저장값이 적용됨)
-const PERSIST = ['groqKey', 'anthropicKey', 'geminiKey', 'sourceLang', 'targetLang', 'model', 'styleGuide', 'glossary'];
+const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'sourceLang', 'targetLang', 'model', 'styleGuide', 'glossary'];
 for (const key of PERSIST) {
   const saved = localStorage.getItem(`subweb-${key}`);
   if (saved !== null) els[key].value = saved;
@@ -470,11 +473,25 @@ async function extractAudioChunks(file) {
 // 2단계: Groq Whisper 자막 추출
 // ─────────────────────────────────────────────────────────────
 
+// 입력된 Groq 키 전체 (기본 + 예비). 한도 초과 시 순서대로 전환한다.
+function groqKeys() {
+  return [els.groqKey.value, els.groqKey2.value, els.groqKey3.value]
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
+// 세션 동안 유지되는 현재 키 인덱스 — 한도가 끝난 키로 되돌아가지 않도록
+let groqKeyIndex = 0;
+
 async function transcribeChunk(blob, offset, chunkIndex, chunkTotal) {
   const language = els.sourceLang.value;
+  const keys = groqKeys();
+  let keySwitches = 0;
+  let waits = 0;
 
-  for (let attempt = 1; ; attempt++) {
+  for (;;) {
     checkCancelled();
+    const key = keys[groqKeyIndex % keys.length];
     const form = new FormData();
     form.append('file', blob, 'chunk.mp3');
     form.append('model', GROQ_MODEL);
@@ -484,16 +501,28 @@ async function transcribeChunk(blob, offset, chunkIndex, chunkTotal) {
 
     const res = await fetch(GROQ_URL, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${els.groqKey.value.trim()}` },
+      headers: { Authorization: `Bearer ${key}` },
       body: form,
       signal: abortController.signal,
     });
 
-    if (res.status === 429 && attempt <= 5) {
-      const wait = Number(res.headers.get('retry-after')) || 15;
-      setStatus(T.groqRateWait(wait, chunkIndex, chunkTotal));
-      await sleep(wait * 1000);
-      continue;
+    if (res.status === 429) {
+      // 예비 키가 남아 있으면 대기 없이 즉시 다음 키로 전환
+      if (keys.length > 1 && keySwitches < keys.length - 1) {
+        groqKeyIndex = (groqKeyIndex + 1) % keys.length;
+        keySwitches++;
+        setStatus(T.groqKeySwitch((groqKeyIndex % keys.length) + 1, keys.length));
+        continue;
+      }
+      // 모든 키가 한도에 걸렸으면 기존처럼 대기 후 재시도
+      if (waits < 5) {
+        waits++;
+        keySwitches = 0;
+        const wait = Number(res.headers.get('retry-after')) || 15;
+        setStatus(T.groqRateWait(wait, chunkIndex, chunkTotal));
+        await sleep(wait * 1000);
+        continue;
+      }
     }
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -1080,7 +1109,7 @@ async function run() {
   const hasMedia = selectedFiles.some((f) => !isSubtitleFile(f));
   const allSubtitles = selectedFiles.every((f) => isSubtitleFile(f));
 
-  if (hasMedia && !els.groqKey.value.trim()) {
+  if (hasMedia && groqKeys().length === 0) {
     showError(T.needGroqKey);
     return;
   }
