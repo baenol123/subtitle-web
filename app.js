@@ -37,6 +37,10 @@ const STRINGS = {
     noAudioTrack: '오디오 트랙을 찾지 못했습니다. 영상에 소리가 있는지 확인해주세요.',
     groqRateWait: (w, i, t) => `Groq 사용량 제한 — ${w}초 대기 후 재시도 (${i}/${t})`,
     groqKeySwitch: (i, n) => `Groq 한도 도달 — 예비 키로 전환 (${i}/${n})`,
+    groqDailyLimit: (sec) => {
+      const t = sec >= 5400 ? `약 ${Math.ceil(sec / 3600)}시간` : `약 ${Math.ceil(sec / 60)}분`;
+      return `Groq 무료 한도가 소진되었습니다 (${t} 후 재시도 가능). 다른 계정의 예비 키를 추가하면 지금 바로 계속할 수 있습니다. 완료된 파일의 결과는 아래에서 받을 수 있습니다.`;
+    },
     groqError: (s, b) => `Groq API 오류 (${s}): ${b}`,
     srtParseError: 'SRT에서 자막 블록을 찾지 못했습니다.',
     refusal: '모델이 이 배치의 번역을 거부했습니다.',
@@ -89,6 +93,10 @@ const STRINGS = {
     noAudioTrack: 'No audio track found. Please check that the video has sound.',
     groqRateWait: (w, i, t) => `Groq rate limit — retrying in ${w}s (${i}/${t})`,
     groqKeySwitch: (i, n) => `Groq limit reached — switching to backup key (${i}/${n})`,
+    groqDailyLimit: (sec) => {
+      const t = sec >= 5400 ? `~${Math.ceil(sec / 3600)}h` : `~${Math.ceil(sec / 60)}min`;
+      return `Groq free-tier quota exhausted (retry available in ${t}). Add a backup key from a different account to continue now. Results for completed files are available below.`;
+    },
     groqError: (s, b) => `Groq API error (${s}): ${b}`,
     srtParseError: 'No subtitle blocks found in the SRT file.',
     refusal: 'The model declined to translate this batch.',
@@ -474,6 +482,22 @@ async function extractAudioChunks(file) {
 // 2단계: Groq Whisper 자막 추출
 // ─────────────────────────────────────────────────────────────
 
+// Groq 일일 한도 소진 — 대기가 무의미하므로 배치 전체를 중단시킬 때 사용
+class GroqQuotaError extends Error {}
+
+// 429 응답에서 실제 대기 시간(초)을 알아낸다.
+// retry-after 헤더는 브라우저 CORS에서 안 보일 수 있어 본문의
+// "try again in 7m59.56s" 같은 문구도 함께 파싱한다.
+function parseGroqWaitSeconds(res, body) {
+  const header = Number(res.headers.get('retry-after'));
+  if (Number.isFinite(header) && header > 0) return header;
+  const match = body.match(/try again in\s+(?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?/i);
+  if (match && (match[1] || match[2] || match[3])) {
+    return Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0);
+  }
+  return 15;
+}
+
 // 입력된 Groq 키 전체 (기본 + 예비). 한도 초과 시 순서대로 전환한다.
 function groqKeys() {
   return [els.groqKey.value, els.groqKey2.value, els.groqKey3.value]
@@ -507,26 +531,32 @@ async function transcribeChunk(blob, offset, chunkIndex, chunkTotal) {
       signal: abortController.signal,
     });
 
-    if (res.status === 429) {
-      // 예비 키가 남아 있으면 대기 없이 즉시 다음 키로 전환
-      if (keys.length > 1 && keySwitches < keys.length - 1) {
-        groqKeyIndex = (groqKeyIndex + 1) % keys.length;
-        keySwitches++;
-        setStatus(T.groqKeySwitch((groqKeyIndex % keys.length) + 1, keys.length));
-        continue;
-      }
-      // 모든 키가 한도에 걸렸으면 기존처럼 대기 후 재시도
-      if (waits < 5) {
-        waits++;
-        keySwitches = 0;
-        const wait = Number(res.headers.get('retry-after')) || 15;
-        setStatus(T.groqRateWait(wait, chunkIndex, chunkTotal));
-        await sleep(wait * 1000);
-        continue;
-      }
-    }
     if (!res.ok) {
       const body = await res.text().catch(() => '');
+
+      if (res.status === 429 || res.status === 503) {
+        // 예비 키가 남아 있으면 대기 없이 즉시 다음 키로 전환
+        if (keys.length > 1 && keySwitches < keys.length - 1) {
+          groqKeyIndex = (groqKeyIndex + 1) % keys.length;
+          keySwitches++;
+          setStatus(T.groqKeySwitch((groqKeyIndex % keys.length) + 1, keys.length));
+          continue;
+        }
+
+        const waitSec = Math.ceil(parseGroqWaitSeconds(res, body));
+        // 20분 넘게 기다려야 하면 일일 한도 소진 — 대기 대신 배치 중단
+        if (waitSec > 1200) {
+          throw new GroqQuotaError(T.groqDailyLimit(waitSec));
+        }
+        if (waits < 5) {
+          waits++;
+          keySwitches = 0;
+          setStatus(T.groqRateWait(waitSec, chunkIndex, chunkTotal));
+          await sleep(waitSec * 1000);
+          continue;
+        }
+      }
+
       throw new Error(T.groqError(res.status, body.slice(0, 300)));
     }
 
@@ -1177,8 +1207,8 @@ async function run() {
         const result = await processOne(file);
         allResults.push(result);
       } catch (err) {
-        // 취소나 키 오류는 전체 중단, 그 외에는 이 파일만 실패 처리하고 계속
-        if (cancelled || isFatalApiError(err)) throw err;
+        // 취소, 키 오류, Groq 한도 소진은 전체 중단 — 그 외에는 이 파일만 실패 처리하고 계속
+        if (cancelled || isFatalApiError(err) || err instanceof GroqQuotaError) throw err;
         console.error(err);
         allResults.push({
           fileName: file.name,
