@@ -64,7 +64,7 @@
   <!-- ===== 히어로 ===== -->
   <section class="hero">
     <h1>영상 자막 추출 &amp; AI 번역</h1>
-    <p>영상이나 오디오 파일을 올리면 Whisper AI가 자막을 추출하고, Claude AI가 자연스럽게 번역해 SRT 파일로 만들어 드립니다.
+    <p>영상이나 오디오 파일을 올리면 Whisper AI가 자막을 추출하고, AI가 자연스럽게 번역해 SRT 파일로 만들어 드립니다.
        <strong>파일은 서버에 업로드되지 않고 브라우저 안에서만 처리됩니다.</strong></p>
   </section>
 
@@ -75,14 +75,18 @@
 
     <!-- API 키 -->
     <section class="panel" aria-labelledby="keys-h">
-      <h2 id="keys-h">1. API 키 <span class="meta">(브라우저에만 저장됩니다)</span></h2>
+      <h2 id="keys-h">1. API 키 <span class="meta">(브라우저에만 저장 · Groq + Gemini 조합이면 완전 무료)</span></h2>
       <div class="grid2">
         <label>
           Groq API 키 <span class="meta">— 자막 추출용 · <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer noopener">console.groq.com/keys</a> (무료 티어 있음)</span>
           <input type="password" id="groqKey" placeholder="gsk_..." autocomplete="off" spellcheck="false" />
         </label>
         <label>
-          Anthropic API 키 <span class="meta">— 번역용 · <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a></span>
+          Google Gemini API 키 <span class="meta">— 번역용(Gemini 모델 선택 시) · <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer noopener">aistudio.google.com/apikey</a> (무료)</span>
+          <input type="password" id="geminiKey" placeholder="AIza..." autocomplete="off" spellcheck="false" />
+        </label>
+        <label>
+          Anthropic API 키 <span class="meta">— 번역용(Claude 모델 선택 시) · <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a> (유료)</span>
           <input type="password" id="anthropicKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
         </label>
       </div>
@@ -103,9 +107,16 @@
         <label>
           번역 모델
           <select id="model">
-            <option value="claude-haiku-4-5" selected>Haiku 4.5 — 빠름/저렴 (자막 추천)</option>
-            <option value="claude-sonnet-4-6">Sonnet 4.6 — 균형</option>
-            <option value="claude-opus-4-8">Opus 4.8 — 고품질</option>
+            <optgroup label="Gemini — Google 키 · 무료 티어">
+              <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash — 무료 추천</option>
+              <option value="gemini-3.5-flash">Gemini 3.5 Flash — 최신·고성능</option>
+              <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite — 가장 빠름</option>
+            </optgroup>
+            <optgroup label="Claude — Anthropic 키 · 유료">
+              <option value="claude-haiku-4-5">Haiku 4.5 — 빠름/저렴</option>
+              <option value="claude-sonnet-4-6">Sonnet 4.6 — 균형</option>
+              <option value="claude-opus-4-8">Opus 4.8 — 고품질</option>
+            </optgroup>
           </select>
         </label>
         <label class="checkline">
@@ -190,7 +201,7 @@
         </article>
         <article class="feature-card">
           <h3>🌏 문맥을 이해하는 AI 번역</h3>
-          <p>단순 기계 번역이 아니라 Claude AI가 앞뒤 대사의 흐름을 참고해 자연스러운 구어체 자막으로 번역합니다. 톤 지시와 용어집으로 말투와 고유명사를 통일할 수 있습니다.</p>
+          <p>단순 기계 번역이 아니라 Gemini·Claude 같은 AI가 앞뒤 대사의 흐름을 참고해 자연스러운 구어체 자막으로 번역합니다. 톤 지시와 용어집으로 말투와 고유명사를 통일할 수 있습니다.</p>
         </article>
         <article class="feature-card">
           <h3>🧹 환각 자막 자동 제거</h3>
@@ -219,9 +230,9 @@
 
     <section class="content-section" aria-labelledby="cost-h">
       <h2 id="cost-h">비용 안내</h2>
-      <p>자막공장 자체는 무료입니다. 다만 자막 추출과 번역에 사용되는 AI는 사용자가 직접 발급한 API 키로 호출되며, 해당 사용량만큼 각 서비스(Groq, Anthropic)에 요금이 부과될 수 있습니다.
-         대략적인 감각으로 1시간 분량의 영상 기준, 자막 추출은 Groq 무료 티어 범위에서 처리되는 경우가 많고 번역은 Haiku 모델 기준 수십 원 수준입니다.
-         정확한 요금은 각 서비스의 요금 페이지를 참고해 주세요.</p>
+      <p>자막공장 자체는 무료이며, <strong>Groq(추출)과 Gemini(번역) 무료 티어 키를 사용하면 전체 과정을 완전 무료로</strong> 이용할 수 있습니다.
+         자막 추출과 번역 AI는 사용자가 직접 발급한 API 키로 호출되는 구조라서, 유료 모델(Claude)을 선택한 경우에만 해당 서비스에 사용량만큼 요금이 부과됩니다.
+         참고로 1시간 분량 영상 기준 Claude Haiku 번역 비용은 수십 원 수준이고, Gemini 무료 티어는 분당 요청 제한이 있어 긴 영상은 중간에 자동 대기가 걸릴 수 있습니다.</p>
     </section>
 
     <section class="content-section" aria-labelledby="faq-h">
@@ -237,7 +248,7 @@
         </details>
         <details>
           <summary>이용 요금이 있나요?</summary>
-          <p>이 사이트는 무료입니다. 다만 AI 호출에 쓰이는 Groq/Anthropic API는 사용자 본인의 키로 호출되므로, 사용량에 따라 각 서비스에서 요금이 발생할 수 있습니다. Groq는 무료 티어를 제공하고, 번역은 1시간 분량 기준 수십~수백 원 수준입니다.</p>
+          <p>이 사이트는 무료입니다. Groq(자막 추출)와 Google Gemini(번역) 무료 티어 키를 사용하면 전 과정을 완전 무료로 쓸 수 있습니다. 더 높은 번역 품질을 원해 Claude 모델을 선택한 경우에만 Anthropic API 사용량에 따라 요금(1시간 분량 기준 수십~수백 원)이 발생합니다.</p>
         </details>
         <details>
           <summary>어떤 파일 형식을 지원하나요?</summary>
@@ -264,7 +275,7 @@
       <a href="privacy.html">개인정보처리방침</a>
       <a href="terms.html">이용약관</a>
     </nav>
-    <div>파일은 서버에 업로드되지 않습니다. 오디오는 Groq(자막 추출), 텍스트는 Anthropic(번역)으로만 전송됩니다.</div>
+    <div>파일은 서버에 업로드되지 않습니다. 오디오는 Groq(자막 추출), 텍스트는 선택한 모델에 따라 Google 또는 Anthropic(번역)으로만 전송됩니다.</div>
     <div>© 2026 자막공장</div>
   </footer>
 
@@ -287,7 +298,7 @@
       {
         "@type": "Question",
         "name": "이용 요금이 있나요?",
-        "acceptedAnswer": { "@type": "Answer", "text": "사이트 자체는 무료입니다. AI 호출은 사용자 본인의 Groq/Anthropic API 키로 이루어지며 사용량에 따라 각 서비스에서 요금이 발생할 수 있습니다." }
+        "acceptedAnswer": { "@type": "Answer", "text": "사이트 자체는 무료입니다. Groq와 Google Gemini의 무료 티어 키를 사용하면 자막 추출부터 번역까지 완전 무료로 이용할 수 있고, Claude 모델을 선택한 경우에만 Anthropic API 사용량에 따라 요금이 발생합니다." }
       },
       {
         "@type": "Question",

@@ -47,16 +47,16 @@
       <ul>
         <li>이용자가 업로드한 영상·오디오 파일은 <strong>본 사이트의 서버로 전송되지 않으며</strong>, 이용자의 브라우저 내에서만 처리됩니다.</li>
         <li>영상에서 분리된 <strong>오디오</strong>는 자막 추출을 위해 이용자의 API 키로 <strong>Groq, Inc.</strong>의 음성 인식 서비스에 전송됩니다.</li>
-        <li>추출되거나 업로드된 <strong>자막 텍스트</strong>는 번역을 위해 이용자의 API 키로 <strong>Anthropic, PBC</strong>의 AI 서비스에 전송됩니다.</li>
+        <li>추출되거나 업로드된 <strong>자막 텍스트</strong>는 번역을 위해 이용자의 API 키로, 선택한 번역 모델에 따라 <strong>Google LLC</strong>(Gemini) 또는 <strong>Anthropic, PBC</strong>(Claude)의 AI 서비스에 전송됩니다.</li>
         <li>전송된 데이터의 처리와 보관은 각 서비스의 개인정보처리방침을 따릅니다:
           <a href="https://groq.com/privacy-policy/" target="_blank" rel="noreferrer noopener">Groq 개인정보처리방침</a> ·
-          <a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noreferrer noopener">Anthropic 개인정보처리방침</a></li>
+          <a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noreferrer noopener">Anthropic 개인정보처리방침</a> · <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer noopener">Google 개인정보처리방침</a></li>
       </ul>
 
       <h2>3. 로컬 저장소(localStorage)</h2>
       <p>편의를 위해 다음 정보가 이용자의 브라우저 로컬 저장소에 저장됩니다. 이 정보는 이용자의 기기를 벗어나지 않습니다.</p>
       <ul>
-        <li>이용자가 입력한 API 키 (Groq, Anthropic)</li>
+        <li>이용자가 입력한 API 키 (Groq, Gemini, Anthropic)</li>
         <li>언어·모델 등 도구 설정, 번역 톤 지시, 용어집</li>
       </ul>
       <p>브라우저 설정에서 사이트 데이터를 삭제하면 위 정보는 모두 제거됩니다. 공용 컴퓨터에서는 사용 후 삭제를 권장합니다.</p>

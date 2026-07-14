@@ -58,7 +58,7 @@
 
   <section class="hero">
     <h1>Extract &amp; Translate Video Subtitles</h1>
-    <p>Upload a video or audio file — Whisper AI extracts the subtitles and Claude AI translates them into natural language, saved as SRT files.
+    <p>Upload a video or audio file — Whisper AI extracts the subtitles and AI translates them into natural language, saved as SRT files.
        <strong>Your files are processed inside your browser and never uploaded to a server.</strong></p>
   </section>
 
@@ -66,14 +66,18 @@
     <!-- ===== Tool area — do not rename ids/classes used by app.js ===== -->
 
     <section class="panel" aria-labelledby="keys-h">
-      <h2 id="keys-h">1. API Keys <span class="meta">(stored only in your browser)</span></h2>
+      <h2 id="keys-h">1. API Keys <span class="meta">(stored only in your browser · Groq + Gemini = completely free)</span></h2>
       <div class="grid2">
         <label>
-          Groq API key <span class="meta">— for extraction · <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer noopener">console.groq.com/keys</a> (free tier available)</span>
+          Groq API key <span class="meta">— for extraction · <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer noopener">console.groq.com/keys</a> (free tier)</span>
           <input type="password" id="groqKey" placeholder="gsk_..." autocomplete="off" spellcheck="false" />
         </label>
         <label>
-          Anthropic API key <span class="meta">— for translation · <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a></span>
+          Google Gemini API key <span class="meta">— for translation (Gemini models) · <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer noopener">aistudio.google.com/apikey</a> (free)</span>
+          <input type="password" id="geminiKey" placeholder="AIza..." autocomplete="off" spellcheck="false" />
+        </label>
+        <label>
+          Anthropic API key <span class="meta">— for translation (Claude models) · <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a> (paid)</span>
           <input type="password" id="anthropicKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
         </label>
       </div>
@@ -93,9 +97,16 @@
         <label>
           Translation model
           <select id="model">
-            <option value="claude-haiku-4-5" selected>Haiku 4.5 — fast &amp; cheap (recommended)</option>
-            <option value="claude-sonnet-4-6">Sonnet 4.6 — balanced</option>
-            <option value="claude-opus-4-8">Opus 4.8 — highest quality</option>
+            <optgroup label="Gemini — Google key · free tier">
+              <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash — free, recommended</option>
+              <option value="gemini-3.5-flash">Gemini 3.5 Flash — newest</option>
+              <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite — fastest</option>
+            </optgroup>
+            <optgroup label="Claude — Anthropic key · paid">
+              <option value="claude-haiku-4-5">Haiku 4.5 — fast &amp; cheap</option>
+              <option value="claude-sonnet-4-6">Sonnet 4.6 — balanced</option>
+              <option value="claude-opus-4-8">Opus 4.8 — highest quality</option>
+            </optgroup>
           </select>
         </label>
         <label class="checkline">
@@ -175,7 +186,7 @@
         </article>
         <article class="feature-card">
           <h3>🌏 Context-aware AI translation</h3>
-          <p>Claude AI translates each line while looking at the surrounding dialogue, producing natural conversational subtitles. Tone and glossary controls keep names and speech styles consistent.</p>
+          <p>Gemini or Claude AI translates each line while looking at the surrounding dialogue, producing natural conversational subtitles. Tone and glossary controls keep names and speech styles consistent.</p>
         </article>
         <article class="feature-card">
           <h3>🧹 Hallucination filtering</h3>
@@ -215,7 +226,7 @@
         </details>
         <details>
           <summary>How much does it cost?</summary>
-          <p>The site is free. AI usage runs on your own API keys — Groq has a free tier, and translating an hour of subtitles with Claude Haiku typically costs a few cents.</p>
+          <p>The site is free — and with Groq (extraction) and Google Gemini (translation) free-tier keys, the whole pipeline runs at zero cost. Only if you pick a Claude model do you pay Anthropic per usage (typically a few cents per hour of subtitles).</p>
         </details>
         <details>
           <summary>What file formats are supported?</summary>
@@ -237,7 +248,7 @@
       <a href="/en/terms">Terms</a>
       <a href="/">한국어</a>
     </nav>
-    <div>Files are never uploaded to our servers. Audio goes to Groq (transcription) and text to Anthropic (translation) only.</div>
+    <div>Files are never uploaded to our servers. Audio goes to Groq (transcription) and text to Google or Anthropic (translation) only, depending on the model you choose.</div>
     <div>© 2026 MakeSubtitles</div>
   </footer>
 
@@ -248,7 +259,7 @@
     "mainEntity": [
       { "@type": "Question", "name": "Is my video uploaded to a server?", "acceptedAnswer": { "@type": "Answer", "text": "No. The video is processed inside your browser. Only the extracted audio is sent to Groq for transcription, and the subtitle text is sent to Anthropic for translation." } },
       { "@type": "Question", "name": "Are my API keys safe?", "acceptedAnswer": { "@type": "Answer", "text": "Keys are stored only in your browser's localStorage and are never sent anywhere other than Groq/Anthropic." } },
-      { "@type": "Question", "name": "How much does it cost?", "acceptedAnswer": { "@type": "Answer", "text": "The site is free. AI usage runs on your own API keys — a one-hour video typically costs a few cents with Claude Haiku." } },
+      { "@type": "Question", "name": "How much does it cost?", "acceptedAnswer": { "@type": "Answer", "text": "The site is free. With Groq and Google Gemini free-tier keys the whole pipeline runs at zero cost; Claude models are optional and billed by Anthropic per usage." } },
       { "@type": "Question", "name": "What file formats are supported?", "acceptedAnswer": { "@type": "Answer", "text": "MP4, MKV, WebM, AVI video; MP3, M4A, WAV, OGG audio; and SRT subtitle files for direct translation." } }
     ]
   }

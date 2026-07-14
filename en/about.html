@@ -50,15 +50,15 @@
         <li><strong>Step 1 — Audio extraction:</strong> your video never leaves your device. The browser separates the audio track locally, using FFmpeg compiled to WebAssembly.</li>
         <li><strong>Step 2 — Subtitle extraction:</strong> the audio is transcribed by Whisper large-v3-turbo, a state-of-the-art speech recognition model, producing timestamped subtitles.</li>
         <li><strong>Step 3 — Hallucination filter:</strong> fake lines that speech models invent during silence ("Thanks for watching" and the like) and abnormal repetitions are removed automatically.</li>
-        <li><strong>Step 4 — AI translation:</strong> Claude AI translates the subtitles while considering the surrounding dialogue. You can pin down speech styles (tone) and terminology (glossary).</li>
+        <li><strong>Step 4 — AI translation:</strong> Gemini or Claude AI translates the subtitles while considering the surrounding dialogue. You can pin down speech styles (tone) and terminology (glossary).</li>
         <li><strong>Step 5 — SRT download:</strong> you get both the original and the translated subtitles as SRT files.</li>
       </ul>
 
       <h2>Why do I enter my own API keys?</h2>
       <p>MakeSubtitles has no server. Your browser calls the speech-recognition service (Groq) and the translation
-         service (Anthropic) directly, so you bring your own API keys. This design has two advantages:</p>
+         service (Google Gemini or Anthropic) directly, so you bring your own API keys. This design has two advantages:</p>
       <ul>
-        <li><strong>Transparency:</strong> it's clear where your data goes. Audio goes to Groq, subtitle text goes to Anthropic — nothing passes through any middleman server.</li>
+        <li><strong>Transparency:</strong> it's clear where your data goes. Audio goes to Groq, subtitle text goes to Google or Anthropic — nothing passes through any middleman server.</li>
         <li><strong>Cost control:</strong> you pay only for what you use, on your own accounts. Processing an hour-long video typically costs a few cents.</li>
       </ul>
       <p>Your API keys are stored only in your browser's local storage and are never transmitted anywhere else.</p>

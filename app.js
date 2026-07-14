@@ -39,6 +39,10 @@ const STRINGS = {
     srtParseError: 'SRT에서 자막 블록을 찾지 못했습니다.',
     refusal: '모델이 이 배치의 번역을 거부했습니다.',
     anthropicRateWait: (w) => `Anthropic 사용량 제한 — ${w}초 대기 후 재시도`,
+    geminiRateWait: (w) => `Gemini 사용량 제한 — ${w}초 대기 후 재시도 (무료 티어는 분당 요청 제한이 있습니다)`,
+    geminiError: (s, b) => `Gemini API 오류 (${s}): ${b}`,
+    geminiEmpty: (r) => `Gemini가 응답을 반환하지 않았습니다 (${r})`,
+    needGeminiKey: 'Gemini 모델을 선택했습니다 — Google Gemini API 키가 필요합니다.',
     noTranslationInResponse: '응답에 번역이 없습니다.',
     translating: (done, total) => `번역 중... ${done}/${total} 블록`,
     refining: (done, total) => `AI 교정 중... ${done}/${total} 블록`,
@@ -86,6 +90,10 @@ const STRINGS = {
     srtParseError: 'No subtitle blocks found in the SRT file.',
     refusal: 'The model declined to translate this batch.',
     anthropicRateWait: (w) => `Anthropic rate limit — retrying in ${w}s`,
+    geminiRateWait: (w) => `Gemini rate limit — retrying in ${w}s (the free tier has per-minute limits)`,
+    geminiError: (s, b) => `Gemini API error (${s}): ${b}`,
+    geminiEmpty: (r) => `Gemini returned no response (${r})`,
+    needGeminiKey: 'A Google Gemini API key is required for the selected Gemini model.',
     noTranslationInResponse: 'No translation in the response.',
     translating: (done, total) => `Translating... ${done}/${total} blocks`,
     refining: (done, total) => `Proofreading... ${done}/${total} blocks`,
@@ -217,7 +225,7 @@ const TRANSLATION_SCHEMA = {
 
 const $ = (id) => document.getElementById(id);
 const els = {
-  groqKey: $('groqKey'), anthropicKey: $('anthropicKey'),
+  groqKey: $('groqKey'), anthropicKey: $('anthropicKey'), geminiKey: $('geminiKey'),
   sourceLang: $('sourceLang'), targetLang: $('targetLang'), model: $('model'),
   skipTranslate: $('skipTranslate'), renameKorean: $('renameKorean'), aiRefine: $('aiRefine'),
   styleGuide: $('styleGuide'), glossary: $('glossary'),
@@ -260,7 +268,7 @@ function populateLanguageSelects() {
 populateLanguageSelects();
 
 // 설정 localStorage 저장/복원 (드롭다운을 채운 뒤에 복원해야 저장값이 적용됨)
-const PERSIST = ['groqKey', 'anthropicKey', 'sourceLang', 'targetLang', 'model', 'styleGuide', 'glossary'];
+const PERSIST = ['groqKey', 'anthropicKey', 'geminiKey', 'sourceLang', 'targetLang', 'model', 'styleGuide', 'glossary'];
 for (const key of PERSIST) {
   const saved = localStorage.getItem(`subweb-${key}`);
   if (saved !== null) els[key].value = saved;
@@ -665,16 +673,38 @@ function extractJsonPayload(text) {
 // 구조화 출력(output_config)이 400으로 거부되면 일반 JSON 모드로 자동 전환
 let structuredOutputSupported = true;
 
+// Gemini의 키/모델 오류 — 재시도 무의미, 즉시 전체 중단용
+class GeminiFatalError extends Error {}
+
 // 키 오류/모델 오류는 재시도·분할해봐야 소용없으니 즉시 전체 중단
 function isFatalApiError(err) {
   return (
+    err instanceof GeminiFatalError ||
     err instanceof Anthropic.AuthenticationError ||
     err instanceof Anthropic.PermissionDeniedError ||
     err instanceof Anthropic.NotFoundError
   );
 }
 
-async function callClaude(client, prompt) {
+// 선택된 모델이 Gemini인지 (모델 id로 번역 엔진을 라우팅)
+function isGeminiModel() {
+  return els.model.value.startsWith('gemini');
+}
+
+// Anthropic 클라이언트는 키가 바뀌지 않는 한 재사용
+let anthropicClient = null;
+let anthropicClientKey = '';
+function getAnthropicClient() {
+  const key = els.anthropicKey.value.trim();
+  if (!anthropicClient || anthropicClientKey !== key) {
+    anthropicClient = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
+    anthropicClientKey = key;
+  }
+  return anthropicClient;
+}
+
+async function callClaude(prompt) {
+  const client = getAnthropicClient();
   for (let attempt = 1; ; attempt++) {
     checkCancelled();
     try {
@@ -709,11 +739,57 @@ async function callClaude(client, prompt) {
   }
 }
 
+async function callGemini(prompt) {
+  const model = els.model.value;
+  const key = els.geminiKey.value.trim();
+  for (let attempt = 1; ; attempt++) {
+    checkCancelled();
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+        }),
+        signal: abortController.signal,
+      }
+    );
+
+    // 무료 티어는 분당 요청 제한이 빡빡해서 429가 정상적으로 발생한다 — 대기 후 재시도
+    if ((res.status === 429 || res.status === 503) && attempt <= 6) {
+      setStatus(T.geminiRateWait(30));
+      await sleep(30000);
+      continue;
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      const message = T.geminiError(res.status, body.slice(0, 300));
+      if ([400, 401, 403, 404].includes(res.status)) throw new GeminiFatalError(message);
+      throw new Error(message);
+    }
+
+    const data = await res.json();
+    const text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+    if (!text.trim()) {
+      const reason = data.promptFeedback?.blockReason ?? data.candidates?.[0]?.finishReason ?? 'EMPTY';
+      throw new Error(T.geminiEmpty(reason));
+    }
+    return JSON.parse(extractJsonPayload(text));
+  }
+}
+
+// 선택된 모델에 따라 Claude/Gemini로 라우팅 — 반환 형식은 동일한 JSON 객체
+async function callModel(prompt) {
+  return isGeminiModel() ? await callGemini(prompt) : await callClaude(prompt);
+}
+
 // 실패 시 이등분 재시도 — 문제 블록만 남기고 나머지는 살린다
-async function translateBatchWithSplit(client, batch, opts) {
+async function translateBatchWithSplit(batch, opts) {
   try {
     const buildPrompt = opts.refine ? buildRefinePrompt : buildBatchPrompt;
-    const parsed = await callClaude(client, buildPrompt(batch.map((b) => ({ id: b.id, text: b.text })), opts));
+    const parsed = await callModel(buildPrompt(batch.map((b) => ({ id: b.id, text: b.text })), opts));
     const byId = new Map((parsed.translations ?? []).map((t) => [t.id, t.translation]));
     return batch.map((b) => {
       const translation = byId.get(b.id);
@@ -727,13 +803,13 @@ async function translateBatchWithSplit(client, batch, opts) {
       return [{ id: batch[0].id, error: err instanceof Error ? err.message : String(err) }];
     }
     const mid = Math.ceil(batch.length / 2);
-    const left = await translateBatchWithSplit(client, batch.slice(0, mid), opts);
-    const right = await translateBatchWithSplit(client, batch.slice(mid), opts);
+    const left = await translateBatchWithSplit(batch.slice(0, mid), opts);
+    const right = await translateBatchWithSplit(batch.slice(mid), opts);
     return [...left, ...right];
   }
 }
 
-async function translateBlocks(client, blocks) {
+async function translateBlocks(blocks) {
   const sourceLabel = languageLabel(els.sourceLang.value);
   const targetLabel = languageLabel(els.targetLang.value);
   const styleGuide = els.styleGuide.value.trim() || undefined;
@@ -753,7 +829,7 @@ async function translateBlocks(client, blocks) {
     setStatus(T.translating(Math.min(offset + BATCH_SIZE, items.length), items.length));
     setProgress(offset / items.length);
 
-    const results = await translateBatchWithSplit(client, batch, {
+    const results = await translateBatchWithSplit(batch, {
       sourceLabel, targetLabel, styleGuide, glossary,
       preceding: items.slice(Math.max(0, firstId - CONTEXT_WINDOW), firstId).map((b) => b.text),
       following: items.slice(lastId + 1, lastId + 1 + CONTEXT_WINDOW).map((b) => b.text),
@@ -778,7 +854,7 @@ async function translateBlocks(client, blocks) {
 }
 
 // Whisper 추출 자막의 AI 교정 — 실패한 배치/블록은 원문을 그대로 둔다
-async function refineBlocks(client, blocks) {
+async function refineBlocks(blocks) {
   const sourceLabel = languageLabel(els.sourceLang.value);
   const glossary = parseGlossary(els.glossary.value);
   const items = blocks.map((b, id) => ({ id, text: b.text }));
@@ -794,7 +870,7 @@ async function refineBlocks(client, blocks) {
     setStatus(T.refining(Math.min(offset + BATCH_SIZE, items.length), items.length));
     setProgress(offset / items.length);
 
-    const results = await translateBatchWithSplit(client, batch, {
+    const results = await translateBatchWithSplit(batch, {
       refine: true, sourceLabel, glossary,
       preceding: items.slice(Math.max(0, firstId - CONTEXT_WINDOW), firstId).map((b) => b.text),
       following: items.slice(lastId + 1, lastId + 1 + CONTEXT_WINDOW).map((b) => b.text),
@@ -815,9 +891,9 @@ async function refineBlocks(client, blocks) {
 }
 
 // 파일명(제목)을 대상 언어로 번역 — 실패하면 원래 이름을 쓴다
-async function translateFileName(client, baseName) {
+async function translateFileName(baseName) {
   try {
-    const parsed = await callClaude(client, buildBatchPrompt([{ id: 0, text: baseName }], {
+    const parsed = await callModel(buildBatchPrompt([{ id: 0, text: baseName }], {
       sourceLabel: languageLabel(els.sourceLang.value),
       targetLabel: languageLabel(els.targetLang.value),
       styleGuide: 'The text is a media file name. Translate it into a natural, concise title. Plain text only — no quotes, no slashes, no file extension.',
@@ -961,8 +1037,7 @@ async function processOne(file) {
     // 3.5 AI 교정 (선택) — 오인식·구두점 등 명백한 오류만 수정
     if (els.aiRefine.checked) {
       setStep('refine', 'active');
-      const client = new Anthropic({ apiKey: els.anthropicKey.value.trim(), dangerouslyAllowBrowser: true });
-      const refinement = await refineBlocks(client, blocks);
+      const refinement = await refineBlocks(blocks);
       blocks = refinement.blocks;
       result.refined = refinement.changed;
       setStep('refine', 'done', refinement.changed > 0 ? T.refinedLabel(refinement.changed) : T.noIssues);
@@ -980,15 +1055,14 @@ async function processOne(file) {
     setStep('translate', 'skipped');
   } else {
     setStep('translate', 'active');
-    const client = new Anthropic({ apiKey: els.anthropicKey.value.trim(), dangerouslyAllowBrowser: true });
-    const translation = await translateBlocks(client, blocks);
+    const translation = await translateBlocks(blocks);
     result.failed = translation.failed;
     result.lastError = translation.lastError;
     result.translatedSrt = buildSrt(translation.blocks);
 
     if (els.renameKorean.checked) {
       setStatus(T.translatingFilename);
-      const translatedName = await translateFileName(client, baseName);
+      const translatedName = await translateFileName(baseName);
       if (translatedName && translatedName !== baseName) result.translatedName = translatedName;
     }
     setStep('translate', 'done', result.failed > 0 ? T.manualNeeded(result.failed) : T.done);
@@ -1010,9 +1084,17 @@ async function run() {
     showError(T.needGroqKey);
     return;
   }
-  if ((!skipTranslate || (hasMedia && els.aiRefine.checked)) && !els.anthropicKey.value.trim()) {
-    showError(T.needAnthropicKey);
-    return;
+  const needsLlm = !skipTranslate || (hasMedia && els.aiRefine.checked);
+  if (needsLlm) {
+    if (isGeminiModel()) {
+      if (!els.geminiKey.value.trim()) {
+        showError(T.needGeminiKey);
+        return;
+      }
+    } else if (!els.anthropicKey.value.trim()) {
+      showError(T.needAnthropicKey);
+      return;
+    }
   }
   if (allSubtitles && skipTranslate) {
     showError(T.nothingToDo);
