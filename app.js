@@ -79,6 +79,7 @@ const STRINGS = {
     statsRemoved: (n) => `환각 ${n}건 제거`,
     statsFailed: (n, m) => `⚠️ ${n}개 블록 "${m}" 표시`,
     statsFilename: (name) => `번역 파일명: ${name}.srt`,
+    statsFilenameFailed: '파일명 번역 실패(원본 이름 유지)',
     partialFail: (msg) => `일부 블록 번역 실패 — 마지막 오류: ${msg}`,
     failedLabel: (msg) => `실패: ${msg}`,
     batchDone: (ok, total) => `${total}개 중 ${ok}개 파일 처리 완료`,
@@ -137,6 +138,7 @@ const STRINGS = {
     statsRemoved: (n) => `${n} hallucinations removed`,
     statsFailed: (n, m) => `⚠️ ${n} marked "${m}"`,
     statsFilename: (name) => `Translated file name: ${name}.srt`,
+    statsFilenameFailed: 'File name translation failed (kept original)',
     partialFail: (msg) => `Some blocks failed to translate — last error: ${msg}`,
     failedLabel: (msg) => `Failed: ${msg}`,
     batchDone: (ok, total) => `${ok} of ${total} file(s) processed`,
@@ -831,6 +833,18 @@ function geminiThinkingConfig(model) {
 // thinking 파라미터가 미래 모델에서 거부되면 자동으로 빼고 재시도
 let geminiThinkingParamOk = true;
 
+// 번역 도구 특성상 자막 원문·파일명이 안전 필터에 걸려 통째로 차단되는 일을 막는다.
+// 사용자 본인 콘텐츠의 번역이므로 필터를 최소로 (Google이 공식 제공하는 파라미터)
+const GEMINI_SAFETY_OFF = [
+  'HARM_CATEGORY_HARASSMENT',
+  'HARM_CATEGORY_HATE_SPEECH',
+  'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+  'HARM_CATEGORY_DANGEROUS_CONTENT',
+].map((category) => ({ category, threshold: 'BLOCK_NONE' }));
+
+// safetySettings를 거부하는 모델이면 자동으로 빼고 재시도
+let geminiSafetyParamOk = true;
+
 // 입력된 Gemini 키 전체 (기본 + 예비). 한도 초과 시 순서대로 전환한다.
 // 무료 한도는 Google 계정 단위이므로 예비 키는 다른 계정에서 발급해야 효과가 있다.
 function geminiKeys() {
@@ -863,6 +877,7 @@ async function callGemini(prompt) {
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
           generationConfig,
+          ...(geminiSafetyParamOk ? { safetySettings: GEMINI_SAFETY_OFF } : {}),
         }),
         signal: abortController.signal,
       }
@@ -875,6 +890,13 @@ async function callGemini(prompt) {
       if (res.status === 400 && thinking && /thinking/i.test(body)) {
         console.warn('thinkingConfig가 거부되어 제외하고 재시도합니다:', body.slice(0, 200));
         geminiThinkingParamOk = false;
+        continue;
+      }
+
+      // safetySettings를 거부하는 모델이면 파라미터를 빼고 한 번 더 시도
+      if (res.status === 400 && geminiSafetyParamOk && /safety/i.test(body)) {
+        console.warn('safetySettings가 거부되어 제외하고 재시도합니다:', body.slice(0, 200));
+        geminiSafetyParamOk = false;
         continue;
       }
 
@@ -1081,7 +1103,8 @@ async function translateFileName(baseName) {
       .slice(0, 80)
       .trim();
     return name || null;
-  } catch {
+  } catch (err) {
+    console.warn('파일명 번역 실패:', err);
     return null;
   }
 }
@@ -1119,6 +1142,7 @@ function renderResultRow(result) {
       result.refined > 0 ? T.statsRefined(result.refined) : '',
       result.failed > 0 ? T.statsFailed(result.failed, MANUAL_MARKER) : '',
       result.translatedName !== result.baseName ? T.statsFilename(result.translatedName) : '',
+      result.renameFailed ? T.statsFilenameFailed : '',
     ].filter(Boolean).join(' · ');
   }
   info.append(title, meta);
@@ -1240,6 +1264,7 @@ async function processOne(file) {
       setStatus(T.translatingFilename);
       const translatedName = await translateFileName(baseName);
       if (translatedName && translatedName !== baseName) result.translatedName = translatedName;
+      else if (!translatedName) result.renameFailed = true;
     }
     setStep('translate', 'done', result.failed > 0 ? T.manualNeeded(result.failed) : T.done);
   }
