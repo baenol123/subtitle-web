@@ -14,10 +14,10 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const GROQ_MODEL = 'whisper-large-v3-turbo';
 
 const CHUNK_SECONDS = 600;      // 10분 단위로 잘라 전송 (Groq 파일 크기 제한 대응)
-const BATCH_SIZE = 20;                // 번역 배치 크기 (Claude)
-const GEMINI_BATCH_SIZE = 50;         // Gemini는 일일 '요청 횟수' 한도가 빡빡해 배치를 크게 잡아 요청 수 절감
-const REFINE_BATCH_SIZE = 40;         // 교정 배치 크기 — 고칠 줄만 반환하므로 크게 잡아도 안전
-const GEMINI_REFINE_BATCH_SIZE = 100;
+const BATCH_SIZE = 20;          // 번역 배치 크기 (Claude)
+const REFINE_BATCH_SIZE = 40;   // 교정 배치 크기 (Claude) — 고칠 줄만 반환하므로 크게 잡아도 안전
+// Gemini는 하루 '요청 횟수' 한도가 가장 빡빡하므로 파일 전체를 한 번에 보낸다 (교정 1회 + 번역 1회).
+// 응답이 출력 길이 제한으로 잘리면 완성된 항목만 회수하고 빠진 줄만 이어서 재요청한다.
 const CONTEXT_WINDOW = 3;       // 앞뒤 참고 블록 수
 const MAX_REPEAT = 2;           // 같은 문장 연속 반복 허용 횟수
 const AUDIO_DIRECT_EXTS = ['.mp3', '.m4a', '.wav', '.ogg', '.opus', '.flac', '.webm'];
@@ -737,6 +737,20 @@ function extractJsonPayload(text) {
   return trimmed;
 }
 
+// 출력 길이 제한으로 잘렸거나 형식이 깨진 응답에서 완성된 항목만 회수한다.
+// 빠진 줄은 호출부(translateBatchWithSplit)가 이어서 재요청한다.
+function salvageTranslations(text) {
+  const out = [];
+  const re = /\{\s*"id"\s*:\s*(\d+)\s*,\s*"translation"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    try {
+      out.push({ id: Number(m[1]), translation: JSON.parse(`"${m[2]}"`) });
+    } catch { /* 이스케이프가 깨진 항목은 버린다 */ }
+  }
+  return out;
+}
+
 // 구조화 출력(output_config)이 400으로 거부되면 일반 JSON 모드로 자동 전환
 let structuredOutputSupported = true;
 
@@ -902,7 +916,18 @@ async function callGemini(prompt) {
       const reason = data.promptFeedback?.blockReason ?? data.candidates?.[0]?.finishReason ?? 'EMPTY';
       throw new Error(T.geminiEmpty(reason));
     }
-    return JSON.parse(extractJsonPayload(text));
+    // 파일 전체를 한 번에 보내므로 응답이 출력 길이 제한(MAX_TOKENS)으로 잘릴 수 있다.
+    // JSON이 깨졌으면 완성된 항목만 회수하고 truncated 표시로 이어받기를 요청한다.
+    const truncatedByLimit = data.candidates?.[0]?.finishReason === 'MAX_TOKENS';
+    try {
+      const parsed = JSON.parse(extractJsonPayload(text));
+      if (truncatedByLimit) parsed.truncated = true;
+      return parsed;
+    } catch (err) {
+      const salvaged = salvageTranslations(text);
+      if (salvaged.length > 0) return { translations: salvaged, truncated: true };
+      throw err;
+    }
   }
 }
 
@@ -918,12 +943,22 @@ async function translateBatchWithSplit(batch, opts) {
     const parsed = await callModel(buildPrompt(batch.map((b) => ({ id: b.id, text: b.text })), opts));
     const byId = new Map((parsed.translations ?? []).map((t) => [t.id, t.translation]));
 
-    // 큰 배치에서 모델이 일부 줄을 빼먹으면 빠진 줄만 모아 한 번 더 요청
-    // (교정 모드는 '고칠 줄만 반환'이 정상이므로 제외)
+    // 큰 배치에서 모델이 일부 줄을 빼먹거나 응답이 잘리면 빠진 줄만 모아 이어서 요청
+    // (교정 모드는 '고칠 줄만 반환'이 정상이므로 잘린 경우에만 이어받는다)
     if (!opts.refine) {
       const missing = batch.filter((b) => !byId.has(b.id));
       if (missing.length > 0 && missing.length < batch.length) {
         const retried = await translateBatchWithSplit(missing, opts);
+        for (const r of retried) {
+          if (r.translation !== undefined) byId.set(r.id, r.translation);
+        }
+      }
+    } else if (parsed.truncated) {
+      // 회수된 마지막 id 이후의 줄들은 아직 검토되지 않았다 — 그 부분만 이어서 교정
+      const maxId = Math.max(-1, ...byId.keys());
+      const rest = batch.filter((b) => b.id > maxId);
+      if (rest.length > 0 && rest.length < batch.length) {
+        const retried = await translateBatchWithSplit(rest, opts);
         for (const r of retried) {
           if (r.translation !== undefined) byId.set(r.id, r.translation);
         }
@@ -959,7 +994,7 @@ async function translateBlocks(blocks) {
   let failed = 0;
   let lastError = '';
 
-  const batchSize = isGeminiModel() ? GEMINI_BATCH_SIZE : BATCH_SIZE;
+  const batchSize = isGeminiModel() ? items.length : BATCH_SIZE;
   for (let offset = 0; offset < items.length; offset += batchSize) {
     checkCancelled();
     const batch = items.slice(offset, offset + batchSize);
@@ -1001,7 +1036,7 @@ async function refineBlocks(blocks) {
   const corrected = new Array(blocks.length);
   let changed = 0;
 
-  const batchSize = isGeminiModel() ? GEMINI_REFINE_BATCH_SIZE : REFINE_BATCH_SIZE;
+  const batchSize = isGeminiModel() ? items.length : REFINE_BATCH_SIZE;
   for (let offset = 0; offset < items.length; offset += batchSize) {
     checkCancelled();
     const batch = items.slice(offset, offset + batchSize);
