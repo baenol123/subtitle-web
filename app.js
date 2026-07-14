@@ -15,6 +15,7 @@ const GROQ_MODEL = 'whisper-large-v3-turbo';
 
 const CHUNK_SECONDS = 600;      // 10분 단위로 잘라 전송 (Groq 파일 크기 제한 대응)
 const BATCH_SIZE = 20;          // 번역 배치 크기
+const REFINE_BATCH_SIZE = 40;   // 교정 배치 크기 — 고칠 줄만 반환하므로 크게 잡아 요청 수 절감
 const CONTEXT_WINDOW = 3;       // 앞뒤 참고 블록 수
 const MAX_REPEAT = 2;           // 같은 문장 연속 반복 허용 횟수
 const AUDIO_DIRECT_EXTS = ['.mp3', '.m4a', '.wav', '.ogg', '.opus', '.flac', '.webm'];
@@ -674,12 +675,12 @@ function buildRefinePrompt(items, opts) {
     'Rules:',
     '- Return only valid JSON. Do not wrap it in markdown.',
     '- JSON shape must be: {"translations":[{"id":number,"translation":string}]} where "translation" is the corrected line.',
-    '- Include exactly one corrected line for every input id.',
+    '- Include ONLY the lines that actually need correction. Omit lines that are already fine.',
+    '- If nothing needs correction, return {"translations":[]}.',
     `- Keep the text in ${opts.sourceLabel}. Do NOT translate.`,
     '- Fix only clear transcription mistakes; use the surrounding lines to infer the intended words.',
     '- Do not paraphrase, summarize, censor, or change meaning, tone, or speech style.',
     '- Do not merge or split lines.',
-    '- If a line is already fine, return it unchanged.',
     glossaryLines ? `- Known names/terms (use these spellings):\n${glossaryLines}` : '',
     contextLines ? `\n${contextLines}` : '',
     '',
@@ -890,13 +891,13 @@ async function refineBlocks(blocks) {
   const corrected = new Array(blocks.length);
   let changed = 0;
 
-  for (let offset = 0; offset < items.length; offset += BATCH_SIZE) {
+  for (let offset = 0; offset < items.length; offset += REFINE_BATCH_SIZE) {
     checkCancelled();
-    const batch = items.slice(offset, offset + BATCH_SIZE);
+    const batch = items.slice(offset, offset + REFINE_BATCH_SIZE);
     const firstId = batch[0].id;
     const lastId = batch[batch.length - 1].id;
 
-    setStatus(T.refining(Math.min(offset + BATCH_SIZE, items.length), items.length));
+    setStatus(T.refining(Math.min(offset + REFINE_BATCH_SIZE, items.length), items.length));
     setProgress(offset / items.length);
 
     const results = await translateBatchWithSplit(batch, {
