@@ -250,6 +250,7 @@ const els = {
   anthropicKey: $('anthropicKey'), geminiKey: $('geminiKey'),
   geminiKey2: $('geminiKey2'), geminiKey3: $('geminiKey3'),
   sourceLang: $('sourceLang'), targetLang: $('targetLang'), model: $('model'),
+  whisperModel: $('whisperModel'),
   skipTranslate: $('skipTranslate'), renameKorean: $('renameKorean'), aiRefine: $('aiRefine'),
   styleGuide: $('styleGuide'), glossary: $('glossary'),
   dropZone: $('dropZone'), fileInput: $('fileInput'), fileInfo: $('fileInfo'),
@@ -291,7 +292,7 @@ function populateLanguageSelects() {
 populateLanguageSelects();
 
 // 설정 localStorage 저장/복원 (드롭다운을 채운 뒤에 복원해야 저장값이 적용됨)
-const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'sourceLang', 'targetLang', 'model', 'styleGuide', 'glossary'];
+const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'sourceLang', 'targetLang', 'model', 'whisperModel', 'styleGuide', 'glossary'];
 for (const key of PERSIST) {
   const saved = localStorage.getItem(`subweb-${key}`);
   if (saved !== null) els[key].value = saved;
@@ -535,7 +536,7 @@ async function transcribeChunk(blob, offset, chunkIndex, chunkTotal) {
     const key = keys[groqKeyIndex % keys.length];
     const form = new FormData();
     form.append('file', blob, 'chunk.mp3');
-    form.append('model', GROQ_MODEL);
+    form.append('model', els.whisperModel ? els.whisperModel.value : GROQ_MODEL);
     form.append('response_format', 'verbose_json');
     form.append('temperature', '0');
     if (language) form.append('language', language);

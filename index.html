@@ -131,6 +131,13 @@
           <select id="targetLang"><!-- app.js가 채움 --></select>
         </label>
         <label>
+          음성 인식 모델
+          <select id="whisperModel">
+            <option value="whisper-large-v3-turbo" selected>Whisper Large v3 Turbo — 빠름 (기본)</option>
+            <option value="whisper-large-v3">Whisper Large v3 — 정확도 우선 (느리고 무료 한도 소모↑)</option>
+          </select>
+        </label>
+        <label>
           번역 모델
           <select id="model">
             <optgroup label="Gemini — Google 키 · 무료 티어">

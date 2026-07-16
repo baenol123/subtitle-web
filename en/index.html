@@ -121,6 +121,13 @@
           <select id="targetLang"><!-- populated by app.js --></select>
         </label>
         <label>
+          Speech-to-text model
+          <select id="whisperModel">
+            <option value="whisper-large-v3-turbo" selected>Whisper Large v3 Turbo — fast (default)</option>
+            <option value="whisper-large-v3">Whisper Large v3 — accuracy first (slower, uses more free quota)</option>
+          </select>
+        </label>
+        <label>
           Translation model
           <select id="model">
             <optgroup label="Gemini — Google key · free tier">
