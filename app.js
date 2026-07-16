@@ -50,6 +50,7 @@ const STRINGS = {
     geminiRateWait: (w) => `Gemini 사용량 제한 — ${w}초 대기 후 재시도 (무료 티어는 분당 요청 제한이 있습니다)`,
     geminiKeySwitch: (i, n) => `Gemini 한도 도달 — 예비 키로 전환 (${i}/${n})`,
     geminiDailyLimit: 'Gemini 무료 일일 한도가 소진되었습니다 (매일 태평양 시간 자정, 한국 시간 오후 4~5시경 초기화). 다른 Google 계정의 예비 키를 추가하거나 모델을 바꾸면 계속할 수 있습니다. 완료된 파일의 결과는 아래에서 받을 수 있습니다.',
+    geminiRateGiveUp: '여러 번 기다려도 Gemini 429가 계속됩니다. 무료 키에서는 이 모델의 한도가 사실상 0일 수 있습니다 — 모델을 Gemini 3.1 Flash-Lite로 바꾸거나, 결제 계정 키를 사용하세요. 완료된 파일의 결과는 아래에서 받을 수 있습니다.',
     geminiError: (s, b) => `Gemini API 오류 (${s}): ${b}`,
     geminiEmpty: (r) => `Gemini가 응답을 반환하지 않았습니다 (${r})`,
     needGeminiKey: 'Gemini 모델을 선택했습니다 — Google Gemini API 키가 필요합니다.',
@@ -109,6 +110,7 @@ const STRINGS = {
     geminiRateWait: (w) => `Gemini rate limit — retrying in ${w}s (the free tier has per-minute limits)`,
     geminiKeySwitch: (i, n) => `Gemini limit reached — switching to backup key (${i}/${n})`,
     geminiDailyLimit: 'Your Gemini free daily quota is exhausted (it resets at midnight Pacific Time). Add a backup key from a different Google account or switch models to continue. Results for completed files are available below.',
+    geminiRateGiveUp: 'Gemini keeps returning 429 despite repeated waits. On free keys this model may have effectively zero quota — switch to Gemini 3.1 Flash-Lite or use a key with billing enabled. Results for completed files are available below.',
     geminiError: (s, b) => `Gemini API error (${s}): ${b}`,
     geminiEmpty: (r) => `Gemini returned no response (${r})`,
     needGeminiKey: 'A Google Gemini API key is required for the selected Gemini model.',
@@ -930,6 +932,10 @@ async function callGemini(prompt) {
           await sleep(waitSec * 1000);
           continue;
         }
+
+        // 기다려도 429가 계속되면 해당 모델의 무료 쿼터가 사실상 0인 경우다 —
+        // 배치를 쪼개 재시도해봐야 소용없으므로 모델 변경을 안내하고 전체 중단
+        if (res.status === 429) throw new GeminiFatalError(T.geminiRateGiveUp);
       }
 
       const message = T.geminiError(res.status, body.slice(0, 300));
