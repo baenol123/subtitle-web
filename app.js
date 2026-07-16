@@ -295,6 +295,11 @@ for (const key of PERSIST) {
   if (saved !== null) els[key].value = saved;
   els[key].addEventListener('change', () => localStorage.setItem(`subweb-${key}`, els[key].value));
 }
+// 지원 종료로 옵션에서 빠진 모델 id가 저장돼 있으면(select 값이 ''가 됨) 기본 모델로 되돌린다
+if (!els.model.value) {
+  els.model.value = 'gemini-3.1-flash-lite';
+  localStorage.setItem('subweb-model', els.model.value);
+}
 
 // ─────────────────────────────────────────────────────────────
 // 상태
