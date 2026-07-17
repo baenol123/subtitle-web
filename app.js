@@ -252,7 +252,7 @@ const els = {
   sourceLang: $('sourceLang'), targetLang: $('targetLang'), model: $('model'),
   whisperModel: $('whisperModel'),
   skipTranslate: $('skipTranslate'), renameKorean: $('renameKorean'), aiRefine: $('aiRefine'),
-  styleGuide: $('styleGuide'), glossary: $('glossary'),
+  styleGuide: $('styleGuide'), glossary: $('glossary'), corrections: $('corrections'),
   dropZone: $('dropZone'), fileInput: $('fileInput'), fileInfo: $('fileInfo'),
   startBtn: $('startBtn'), cancelBtn: $('cancelBtn'),
   progressPanel: $('progressPanel'), steps: $('steps'),
@@ -292,8 +292,9 @@ function populateLanguageSelects() {
 populateLanguageSelects();
 
 // 설정 localStorage 저장/복원 (드롭다운을 채운 뒤에 복원해야 저장값이 적용됨)
-const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'sourceLang', 'targetLang', 'model', 'whisperModel', 'styleGuide', 'glossary'];
+const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'sourceLang', 'targetLang', 'model', 'whisperModel', 'styleGuide', 'glossary', 'corrections'];
 for (const key of PERSIST) {
+  if (!els[key]) continue; // 캐시된 옛 HTML에 아직 없는 입력칸은 건너뛴다
   const saved = localStorage.getItem(`subweb-${key}`);
   if (saved !== null) els[key].value = saved;
   els[key].addEventListener('change', () => localStorage.setItem(`subweb-${key}`, els[key].value));
@@ -671,6 +672,18 @@ function parseGlossary(text) {
   return Object.keys(entries).length > 0 ? entries : null;
 }
 
+// 교정 치환 — 번역 결과에 대한 후처리 찾아 바꾸기. 긴 항목부터 적용해 부분 문자열 충돌을 피한다.
+function parseCorrections() {
+  return els.corrections ? parseGlossary(els.corrections.value) : null;
+}
+
+function applyCorrections(text, corrections) {
+  if (!corrections) return text;
+  return Object.entries(corrections)
+    .sort(([a], [b]) => b.length - a.length)
+    .reduce((current, [wrong, fixed]) => current.split(wrong).join(fixed), text);
+}
+
 function buildBatchPrompt(items, opts) {
   const glossaryLines = opts.glossary
     ? Object.entries(opts.glossary).map(([k, v]) => `- ${k} -> ${v}`).join('\n')
@@ -1022,6 +1035,7 @@ async function translateBlocks(blocks) {
   const targetLabel = languageLabel(els.targetLang.value);
   const styleGuide = els.styleGuide.value.trim() || undefined;
   const glossary = parseGlossary(els.glossary.value);
+  const corrections = parseCorrections();
 
   const items = blocks.map((b, id) => ({ id, text: b.text }));
   const translated = new Array(blocks.length);
@@ -1046,7 +1060,7 @@ async function translateBlocks(blocks) {
 
     for (const r of results) {
       if (r.translation !== undefined) {
-        translated[r.id] = r.translation;
+        translated[r.id] = applyCorrections(r.translation, corrections);
       } else {
         translated[r.id] = `${MANUAL_MARKER} ${items[r.id].text}`;
         failed++;
@@ -1108,7 +1122,7 @@ async function translateFileName(baseName) {
       targetLabel: languageLabel(els.targetLang.value),
       styleGuide: 'The text is a media file name. Translate it into a natural, concise title. Plain text only — no quotes, no slashes, no file extension.',
     }));
-    const name = (parsed.translations?.[0]?.translation ?? '')
+    const name = applyCorrections(parsed.translations?.[0]?.translation ?? '', parseCorrections())
       .replace(/[\\/:*?"<>|]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
