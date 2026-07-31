@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>자막 싱크 안 맞을 때 고치는 법 (밀림·어긋남 보정) | 자막공장</title>
+  <meta name="description" content="자막이 영상보다 빠르거나 느리게 나올 때 원인을 진단하고 고치는 방법을 정리합니다. 고정 지연 보정부터 프레임레이트 불일치까지, 플레이어별 해결법과 SRT 직접 수정법." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://makesubtitles.com/guide/subtitle-sync-fix" />
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="자막공장" />
+  <meta property="og:title" content="자막 싱크 안 맞을 때 고치는 법" />
+  <meta property="og:description" content="자막이 영상보다 빠르거나 느릴 때의 원인 진단과 해결법" />
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8450746629673540"
+     crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="/style.css" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "자막 싱크 안 맞을 때 고치는 법",
+    "inLanguage": "ko",
+    "datePublished": "2026-07-31",
+    "author": { "@type": "Organization", "name": "자막공장" },
+    "publisher": { "@type": "Organization", "name": "자막공장" },
+    "mainEntityOfPage": "https://makesubtitles.com/guide/subtitle-sync-fix"
+  }
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="/">자막공장<span class="dot">.</span></a>
+      <nav class="site-nav" aria-label="주 메뉴">
+        <a href="/">자막 추출·번역</a>
+        <a href="/guide/" class="current">가이드</a>
+        <a href="/about">소개</a>
+        <a href="/privacy">개인정보처리방침</a>
+        <a href="/terms">이용약관</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <article class="doc">
+      <h1>자막 싱크 안 맞을 때 고치는 법</h1>
+      <p class="updated">2026년 7월 31일 · 자막공장 가이드</p>
+
+      <p>분명 잘 받은 자막인데 재생해 보면 대사보다 자막이 먼저 뜨거나, 반대로 몇 초씩 늦게 뜨는 경우가 있습니다.
+         원인은 크게 두 가지 — <strong>영상과 자막의 시작 시점이 다른 경우</strong>와
+         <strong>영상과 자막의 프레임레이트(재생 속도 기준)가 다른 경우</strong>로 나뉩니다.
+         원인에 따라 해결법이 완전히 다르므로 먼저 어떤 유형인지 확인하는 게 순서입니다.</p>
+
+      <h2>진단 — 고정 지연인가, 갈수록 벌어지는가</h2>
+      <ul>
+        <li><strong>영상 초반부터 끝까지 항상 비슷한 정도로 어긋난다</strong> → 고정 지연(offset) 문제. 대부분 자막 소스가 다른 버전의 영상(인트로 길이가 다른 리마스터판 등)에 맞춰 만들어졌을 때 발생합니다.</li>
+        <li><strong>초반엔 맞다가 뒤로 갈수록 점점 벌어진다</strong> → 프레임레이트 불일치. 23.976fps와 25fps처럼 초당 프레임 수가 다른 두 버전 사이에서 자막을 그대로 옮겨 쓸 때 생깁니다.</li>
+      </ul>
+
+      <h2>고정 지연 고치기 — 플레이어에서 즉시 보정</h2>
+      <p>가장 빠른 해결법은 플레이어의 자막 지연 단축키를 쓰는 것입니다. 재생 중 실시간으로 맞춰볼 수 있어 편리합니다.</p>
+      <ul>
+        <li><strong>VLC</strong> — <code>H</code>: 자막 0.1초 늦추기 / <code>G</code>: 자막 0.1초 당기기</li>
+        <li><strong>팟플레이어</strong> — <code>Shift + F5</code> / <code>Shift + F6</code></li>
+        <li><strong>곰플레이어</strong> — 자막 메뉴 → 자막 동기화에서 슬라이더로 조절</li>
+      </ul>
+      <p>다만 이 방법은 그 플레이어를 켤 때마다 다시 맞춰야 하므로, 영구적으로 고치려면 SRT 파일 자체의 타임스탬프를 수정해야 합니다.</p>
+
+      <h2>SRT 파일 자체를 고치는 법</h2>
+      <p>SRT의 타임스탬프는 <code>시:분:초,밀리초</code> 형식의 단순 텍스트라, 무료 도구로 전체 줄에 같은 값을 일괄 더하거나 뺄 수 있습니다.
+         Subtitle Edit(Windows) 같은 프로그램에서 "동기화 → 모든 줄에 시간 표시 조정"을 쓰면
+         첫 줄과 마지막 줄의 정확한 시각 두 개만 입력해도 나머지 줄이 비율에 맞게 자동으로 재계산됩니다 —
+         이 방식이 고정 지연과 프레임레이트 문제를 동시에 해결해 줍니다.</p>
+
+      <h2>애초에 싱크가 안 맞는 자막을 안 만들려면</h2>
+      <p>가장 확실한 예방책은 <strong>지금 보고 있는 그 영상 파일에서 직접 자막을 뽑는 것</strong>입니다.
+         다른 사람이 배포한 자막을 받아 쓰면 인코딩 버전이 달라 싱크가 어긋날 위험이 항상 따라오지만,
+         <a href="/">자막공장</a>처럼 내 영상 파일의 오디오를 직접 분석해 <a href="/guide/what-is-srt">SRT</a>를 생성하는 방식은
+         애초에 그 영상에 맞춰 타임스탬프가 나오기 때문에 이런 문제가 생기지 않습니다.</p>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <nav aria-label="푸터 메뉴">
+      <a href="/">자막 추출·번역</a>
+      <a href="/guide/">가이드</a>
+      <a href="/about">사이트 소개</a>
+      <a href="/privacy">개인정보처리방침</a>
+      <a href="/terms">이용약관</a>
+    </nav>
+    <div>© 2026 자막공장</div>
+  </footer>
+</body>
+</html>

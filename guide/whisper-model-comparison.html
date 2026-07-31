@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Whisper 모델 크기별 비교 (tiny~large-v3, turbo) | 자막공장</title>
+  <meta name="description" content="Whisper의 tiny·base·small·medium·large-v3·large-v3-turbo 모델을 정확도, 속도, 요구 사양 기준으로 비교합니다. 자막 추출에 어떤 모델을 골라야 하는지 알려드립니다." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://makesubtitles.com/guide/whisper-model-comparison" />
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="자막공장" />
+  <meta property="og:title" content="Whisper 모델 크기별 비교" />
+  <meta property="og:description" content="tiny부터 large-v3-turbo까지, 자막 추출에 맞는 Whisper 모델 고르는 법" />
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8450746629673540"
+     crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="/style.css" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "Whisper 모델 크기별 비교",
+    "inLanguage": "ko",
+    "datePublished": "2026-07-31",
+    "author": { "@type": "Organization", "name": "자막공장" },
+    "publisher": { "@type": "Organization", "name": "자막공장" },
+    "mainEntityOfPage": "https://makesubtitles.com/guide/whisper-model-comparison"
+  }
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="/">자막공장<span class="dot">.</span></a>
+      <nav class="site-nav" aria-label="주 메뉴">
+        <a href="/">자막 추출·번역</a>
+        <a href="/guide/" class="current">가이드</a>
+        <a href="/about">소개</a>
+        <a href="/privacy">개인정보처리방침</a>
+        <a href="/terms">이용약관</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <article class="doc">
+      <h1>Whisper 모델 크기별 비교</h1>
+      <p class="updated">2026년 7월 31일 · 자막공장 가이드</p>
+
+      <p><a href="/guide/what-is-whisper">Whisper</a>는 하나의 모델이 아니라 크기가 다른 여러 버전으로 배포됩니다.
+         이름 뒤에 붙는 tiny, base, small, medium, large는 모델의 파라미터 수(=학습된 지식의 양)를 나타내며,
+         클수록 정확하지만 느리고 무거워집니다. 여기에 속도를 크게 개선한 turbo 버전이 더해져 선택지가 늘었습니다.</p>
+
+      <h2>모델별 특징</h2>
+      <ul>
+        <li><strong>tiny / base</strong> — 매우 빠르고 가볍지만 오인식이 잦습니다. 실시간 자막처럼 속도가 정확도보다 중요한 용도가 아니면 자막 제작에는 잘 쓰이지 않습니다.</li>
+        <li><strong>small / medium</strong> — 정확도와 속도의 중간 지점. 영어 위주라면 준수하지만, 일본어·중국어 등에서는 large 계열과 체감 차이가 큽니다.</li>
+        <li><strong>large-v3</strong> — Whisper 중 가장 정확합니다. 배경 소음이 있거나 발음이 불분명한 구간에서도 다른 모델보다 안정적입니다. 대신 처리 속도가 느립니다.</li>
+        <li><strong>large-v3-turbo</strong> — large-v3의 디코더 레이어 수를 줄여 <strong>정확도는 거의 유지하면서 속도를 4~5배 끌어올린</strong> 버전입니다. 대부분의 실사용 상황에서 가장 균형 잡힌 선택입니다.</li>
+      </ul>
+
+      <h2>왜 large-v3-turbo가 기본값으로 많이 쓰이는가</h2>
+      <p>과거에는 "정확도를 원하면 large, 속도를 원하면 small"이라는 트레이드오프가 뚜렷했지만,
+         turbo 등장 이후에는 <strong>large-v3와 비슷한 정확도를 medium에 가까운 속도로</strong> 얻을 수 있게 되면서
+         구도가 크게 바뀌었습니다. 무료로 자막을 뽑는 서비스나 도구들이 기본 모델로 turbo를 채택하는 이유이기도 합니다.</p>
+
+      <h2>그래도 large-v3(비-turbo)를 쓰는 경우</h2>
+      <p>turbo가 대부분 상황에서 충분하지만, 배경 소음이 크게 섞였거나 발화가 겹치는 등
+         <strong>극단적으로 어려운 오디오</strong>에서는 원본 large-v3가 아주 근소하게 더 정확한 경우가 보고됩니다.
+         시간 여유가 있고 정확도를 한 톨이라도 더 끌어올리고 싶은 파일에만 골라 쓰는 정도가 현실적입니다.</p>
+
+      <h2>직접 비교해 보고 싶다면</h2>
+      <p><a href="/">자막공장</a>에서는 자막 추출 시 음성 인식 모델로 <strong>large-v3-turbo(기본, 빠름)</strong>와
+         <strong>large-v3(정확도 우선)</strong> 중 선택할 수 있습니다. 같은 영상을 두 모델로 각각 돌려
+         결과를 비교해 보면 어떤 모델이 내 콘텐츠에 맞는지 직접 확인할 수 있습니다.</p>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <nav aria-label="푸터 메뉴">
+      <a href="/">자막 추출·번역</a>
+      <a href="/guide/">가이드</a>
+      <a href="/about">사이트 소개</a>
+      <a href="/privacy">개인정보처리방침</a>
+      <a href="/terms">이용약관</a>
+    </nav>
+    <div>© 2026 자막공장</div>
+  </footer>
+</body>
+</html>

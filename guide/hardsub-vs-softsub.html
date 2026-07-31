@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>하드섭 vs 소프트섭 차이 — mp4에 자막 입히는 법 | 자막공장</title>
+  <meta name="description" content="자막을 영상에 굽는 하드섭과 파일로 따로 두는 소프트섭의 차이를 설명합니다. 상황별로 어떤 방식을 고를지, ffmpeg로 자막을 입히는 기본 방법까지 정리했습니다." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://makesubtitles.com/guide/hardsub-vs-softsub" />
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="자막공장" />
+  <meta property="og:title" content="하드섭 vs 소프트섭 차이" />
+  <meta property="og:description" content="자막을 영상에 굽는 방식과 파일로 분리하는 방식의 차이" />
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8450746629673540"
+     crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="/style.css" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "하드섭 vs 소프트섭 차이",
+    "inLanguage": "ko",
+    "datePublished": "2026-07-31",
+    "author": { "@type": "Organization", "name": "자막공장" },
+    "publisher": { "@type": "Organization", "name": "자막공장" },
+    "mainEntityOfPage": "https://makesubtitles.com/guide/hardsub-vs-softsub"
+  }
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="inner">
+      <a class="brand" href="/">자막공장<span class="dot">.</span></a>
+      <nav class="site-nav" aria-label="주 메뉴">
+        <a href="/">자막 추출·번역</a>
+        <a href="/guide/" class="current">가이드</a>
+        <a href="/about">소개</a>
+        <a href="/privacy">개인정보처리방침</a>
+        <a href="/terms">이용약관</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <article class="doc">
+      <h1>하드섭 vs 소프트섭 차이</h1>
+      <p class="updated">2026년 7월 31일 · 자막공장 가이드</p>
+
+      <p>자막을 영상에 붙이는 방식은 크게 두 가지입니다. 자막을 영상 화면에 아예 그려 넣어 하나의 영상 파일로 만드는
+         <strong>하드섭(hardsub)</strong>과, 자막을 별도 파일(SRT 등)로 두고 재생할 때 플레이어가 겹쳐 보여주는
+         <strong>소프트섭(softsub)</strong>입니다.</p>
+
+      <h2>소프트섭 — 대부분의 경우 이게 정답</h2>
+      <ul>
+        <li>자막을 끄거나 켤 수 있고, 언어를 바꿀 수도 있습니다.</li>
+        <li>오타를 발견해도 자막 파일만 다시 고치면 됩니다. 영상을 다시 인코딩할 필요가 없습니다.</li>
+        <li>영상 화질 저하가 전혀 없습니다.</li>
+        <li>단점은 자막이 영상과 별도 파일이라, <a href="/guide/what-is-srt">파일명을 영상과 맞춰야</a> 플레이어가 자동으로 불러옵니다. 자막 파일을 따로 챙기지 않으면 자막이 사라진 것처럼 보일 수 있습니다.</li>
+      </ul>
+
+      <h2>하드섭 — 자막이 반드시 보여야 할 때</h2>
+      <ul>
+        <li>어떤 플레이어로 재생하든, 어떤 플랫폼에 올리든 자막이 항상 표시됩니다. SNS나 유튜브 쇼츠처럼 소프트섭을 지원하지 않는 플랫폼에 올릴 때 필수적입니다.</li>
+        <li>ASS 형식의 화려한 스타일(색상, 애니메이션, 위치 이동)까지 그대로 화면에 반영할 수 있습니다.</li>
+        <li>단점은 한 번 구우면 수정하려면 처음부터 다시 인코딩해야 하고, 인코딩 과정에서 화질이 소폭 손실됩니다.</li>
+      </ul>
+
+      <h2>ffmpeg로 자막 굽는 기본 명령어</h2>
+      <p>무료 도구인 ffmpeg로 mp4에 SRT를 하드섭으로 구우려면 다음과 같은 명령을 씁니다.</p>
+      <pre>ffmpeg -i input.mp4 -vf "subtitles=input.srt" output.mp4</pre>
+      <p>글꼴 크기나 색상을 지정하고 싶다면 <code>subtitles=input.srt:force_style='FontSize=24,PrimaryColour=&HFFFFFF&'</code>
+         처럼 스타일 옵션을 추가할 수 있습니다.</p>
+
+      <h2>정리 — 어떤 걸 골라야 하나</h2>
+      <p>보관용이거나 여러 언어를 지원해야 한다면 소프트섭, SNS에 올리거나 자막 스타일을 완전히 통제하고 싶다면 하드섭입니다.
+         어느 쪽이든 시작은 정확한 SRT 파일이 필요하므로, <a href="/">자막공장</a>에서 영상의 자막을
+         먼저 추출·번역해두고 필요에 따라 소프트섭으로 쓰거나 위 명령으로 하드섭으로 구우면 됩니다.</p>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <nav aria-label="푸터 메뉴">
+      <a href="/">자막 추출·번역</a>
+      <a href="/guide/">가이드</a>
+      <a href="/about">사이트 소개</a>
+      <a href="/privacy">개인정보처리방침</a>
+      <a href="/terms">이용약관</a>
+    </nav>
+    <div>© 2026 자막공장</div>
+  </footer>
+</body>
+</html>
