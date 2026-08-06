@@ -1239,30 +1239,75 @@ async function refineBlocks(blocks) {
   };
 }
 
-// 파일명 앞머리의 회차 번호를 분리한다. "4-1 방과후" → { index: '4-1 ', title: '방과후' }
-// 번호 뒤에 공백이 와야만 인정하므로 "1-1", "2024년 결산", "RJ01234567 작품명" 같은 건 건드리지 않는다.
-const LEADING_INDEX =
-  /^\s*(?:[[(#]\s*)?(?:EP|Ep|ep|Episode|episode)?\s*\d+(?:\s*[-._~]\s*\d+)*(?:\s*[)\]])?\s*[.\-–—:_]?\s+/;
+// 파일명 앞뒤에 붙는 "번역하면 안 되는" 토큰을 떼어낸다.
+//   "01.♥TR0_オープニング-男納射捕神社-1_SEless"
+//     → prefix "01.♥TR0_" / body "オープニング-男納射捕神社-1" / suffix "_SEless"
+//
+// 모델에는 body만 보내고 번역이 끝나면 prefix·suffix를 그대로 다시 붙인다.
+// 프롬프트로 "지우지 마"라고 부탁하는 방식과 달리 모델이 볼 수조차 없으므로 사라질 여지가 없다.
+// (실제로 프롬프트에는 이미 번호 유지 규칙이 있었지만 모델이 TR0_ 를 번호로 보지 않고 지웠고,
+//  그 결과 keepsNumbers 가 번역 전체를 폐기해 파일명이 하나도 안 바뀌었다.)
+//
+// 각 패턴은 뒤에 구분자나 문자열 끝이 와야만 인정한다.
+// 그래서 "2024년 결산"의 2024, "RJ01234567 작품명"의 품번은 떼어내지 않는다.
+const AFFIX_MARK = '\\s♥❤★☆♪♬◆◇■□●○◎・:：\\-–—_~|.';
+const NAME_PREFIX_TOKENS = [
+  new RegExp(`^[${AFFIX_MARK}]+`),                                              // 장식·구분자
+  new RegExp(`^[[(#]?\\s*(?:EP|Episode)?\\s*\\d+(?:\\s*[-._~]\\s*\\d+)*\\s*[)\\]]?(?=[${AFFIX_MARK})\\]]|$)`, 'i'),  // 회차 번호
+  new RegExp(`^(?:TR|Track|Disc|CD|Vol|SE)\\s*\\d*(?=[${AFFIX_MARK}]|$)`, 'i'), // 트랙·디스크 표기
+];
+const NAME_SUFFIX_TOKENS = [
+  new RegExp(`[${AFFIX_MARK}]+$`),
+  /[\s_\-–—.]*(?:SE\s*(?:less|なし|無し)|no\s*SE)$/i,                            // _SEless, SEなし …
+  /[\s_\-–—.]+SE$/i,                                                            // 구분자가 앞에 있을 때만 맨 SE
+];
 
-function splitLeadingIndex(name) {
-  const m = name.match(LEADING_INDEX);
-  if (!m) return { index: '', title: name.trim() };
-  const title = name.slice(m[0].length).trim();
-  if (!title) return { index: '', title: name.trim() };   // 전부 번호뿐이면 그대로 둔다
-  return { index: m[0], title };
+function splitNameAffixes(name) {
+  const original = String(name ?? '').trim();
+  let prefix = '', suffix = '', body = original;
+
+  for (let pass = 0; pass < 20; pass++) {
+    let changed = false;
+    for (const re of NAME_PREFIX_TOKENS) {
+      const m = body.match(re);
+      if (!m || !m[0] || m[0].length >= body.length) continue;   // 전부 먹어치우면 떼지 않는다
+      prefix += m[0];
+      body = body.slice(m[0].length);
+      changed = true;
+    }
+    for (const re of NAME_SUFFIX_TOKENS) {
+      const m = body.match(re);
+      if (!m || !m[0] || m[0].length >= body.length) continue;
+      suffix = m[0] + suffix;
+      body = body.slice(0, body.length - m[0].length);
+      changed = true;
+    }
+    if (!changed) break;
+  }
+
+  // 떼어내고 나니 번역할 게 안 남는 이름(번호·기호뿐)이면 마스킹을 포기하고 통째로 넘긴다.
+  if (!body || !new RegExp(`[^${AFFIX_MARK}\\d]`).test(body)) {
+    return { prefix: '', body: original, suffix: '' };
+  }
+  return { prefix, body, suffix };
 }
 
-function sanitizeFileName(text) {
-  return String(text ?? '')
-    .replace(/[\\/:*?"<>|]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 80)
-    .trim();
+const MAX_FILE_NAME = 80;
+
+function cleanNamePart(text) {
+  return String(text ?? '').replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ');
+}
+
+// prefix·suffix 는 길이 예산에서 먼저 빼둔다. 전체를 자르면 _SEless 같은 꼬리가 잘려나간다.
+function assembleFileName(prefix, body, suffix) {
+  const p = cleanNamePart(prefix);
+  const s = cleanNamePart(suffix);
+  const room = Math.max(1, MAX_FILE_NAME - p.length - s.length);
+  return (p + cleanNamePart(body).trim().slice(0, room) + s).trim();
 }
 
 // 원본에 있던 숫자가 번역 결과에도 순서대로 남아 있는지 확인한다.
-// 번호가 사라지거나 바뀌면 번역을 버리고 원래 이름을 쓴다.
+// 마스킹 덕분에 평상시엔 걸릴 일이 없고, 모델이 제목 안의 숫자를 건드렸을 때만 발동하는 안전망이다.
 function keepsNumbers(src, out) {
   const want = src.match(/\d+/g);
   if (!want) return true;
@@ -1295,19 +1340,19 @@ function buildFileNamePrompt(items, opts) {
 
 /**
  * 선택된 파일 이름들을 한 번에 번역한다.
- *  - 회차 번호는 모델에 보내지 않고 그대로 붙인다 (번호가 바뀔 여지를 없앤다)
- *  - 번호를 뗀 제목이 같으면 한 번만 번역해 재사용한다 → "4-1 방과후"와 "4-2 방과후"는 항상 같은 번역
+ *  - 회차 번호·트랙 표기·SE 꼬리는 모델에 보내지 않고 그대로 붙인다 (사라질 여지를 없앤다)
+ *  - 마스킹 후 제목이 같으면 한 번만 번역해 재사용한다 → "4-1 방과후"와 "4-2 방과후"는 항상 같은 번역
  *  - 전체를 한 요청에 담아 모델이 다른 제목까지 참고해 용어를 맞추게 한다
  * 반환: Map(원본 baseName → 번역된 이름). 실패한 항목은 Map에 없다.
  */
 async function translateFileNames(baseNames) {
   const out = new Map();
-  const parts = new Map();                     // baseName → { index, title }
-  const titles = [];                           // 중복 제거된 제목
+  const parts = new Map();                     // baseName → { prefix, body, suffix }
+  const titles = [];                           // 중복 제거된 제목(body)
   for (const name of baseNames) {
-    const p = splitLeadingIndex(name);
+    const p = splitNameAffixes(name);
     parts.set(name, p);
-    if (!titles.includes(p.title)) titles.push(p.title);
+    if (!titles.includes(p.body)) titles.push(p.body);
   }
   if (titles.length === 0) return out;
 
@@ -1334,15 +1379,15 @@ async function translateFileNames(baseNames) {
   for (const r of results) {
     if (r.translation === undefined) continue;
     const src = titles[r.id];
-    const translated = sanitizeFileName(applyCorrections(r.translation, corrections));
+    const translated = cleanNamePart(applyCorrections(r.translation, corrections)).trim();
     if (translated && keepsNumbers(src, translated)) byTitle.set(src, translated);
-    else if (translated) console.warn(`파일명 번역에서 번호가 어긋나 원본을 유지합니다: ${src} → ${translated}`);
+    else if (translated) console.warn(`파일명 번역에서 제목 안의 숫자가 어긋나 원본을 유지합니다: ${src} → ${translated}`);
   }
 
-  for (const [name, { index, title }] of parts) {
-    const translated = byTitle.get(title);
+  for (const [name, { prefix, body, suffix }] of parts) {
+    const translated = byTitle.get(body);
     if (!translated) continue;
-    const full = sanitizeFileName(index + translated);
+    const full = assembleFileName(prefix, translated, suffix);
     if (full && full !== name) out.set(name, full);
   }
   return out;
