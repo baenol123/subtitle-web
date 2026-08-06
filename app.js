@@ -276,6 +276,7 @@ const els = {
   errorBanner: $('errorBanner'),
   resultPanel: $('resultPanel'), resultStats: $('resultStats'),
   resultsList: $('resultsList'), downloadAllBtn: $('downloadAllBtn'),
+  renameBatBtn: $('renameBatBtn'),
 };
 
 // 언어 드롭다운 채우기 — 페이지 언어에 맞는 이름으로, 주요/전체 그룹 분리
@@ -1351,6 +1352,63 @@ async function translateFileNames(baseNames) {
 // 결과 표시/다운로드
 // ─────────────────────────────────────────────────────────────
 
+// ── 원본 파일 이름 바꾸기 .bat 생성 ───────────────────────────────
+//
+// 브라우저에서 사용자의 실제 파일 이름을 직접 바꾸려면 File System Access API가 필요한데,
+// 로컬 파일에 대한 FileSystemFileHandle.move()는 아직 플래그 뒤에 있고,
+// 복사 후 삭제로 흉내내면 수 GB짜리 영상을 통째로 다시 써야 한다.
+// 그래서 이름만 바꾸는 배치 파일을 대신 내려준다 — 복사가 없고 즉시 끝난다.
+//
+// 인코딩: 원본이 일본어, 결과가 한국어라 어떤 단일 ANSI 코드페이지로도 둘 다 담을 수 없다.
+// UTF-8(BOM 없음) + `chcp 65001` 조합으로 실제 동작을 확인했다. BOM이 있으면 첫 줄이 깨진다.
+
+// cmd에서 특수한 의미를 갖는 문자가 이름에 있으면 ren이 오작동할 수 있다.
+const BAT_UNSAFE = /[%!^&<>|"]/;
+
+function buildRenameBat(pairs) {
+  const lines = [
+    '@echo off',
+    'chcp 65001 >nul',
+    'setlocal',
+    'cd /d "%~dp0"',
+    'echo 자막공장 - 원본 파일 이름 바꾸기',
+    'echo.',
+  ];
+  let skipped = 0;
+  for (const { from, to } of pairs) {
+    if (from === to) continue;
+    // 이름에 cmd 특수문자가 있으면 안전하게 건너뛰고 사람이 직접 처리하게 남긴다
+    if (BAT_UNSAFE.test(from) || BAT_UNSAFE.test(to)) {
+      lines.push(`echo [건너뜀] ${from.replace(/[%!^&<>|"]/g, '?')}`);
+      skipped++;
+      continue;
+    }
+    lines.push(`if exist "${to}" (`);
+    lines.push(`  echo [이미 있음] ${to}`);
+    lines.push(`) else if exist "${from}" (`);
+    lines.push(`  ren "${from}" "${to}" && echo [완료] ${to} || echo [실패] ${from}`);
+    lines.push(`) else (`);
+    lines.push(`  echo [없음] ${from}`);
+    lines.push(`)`);
+  }
+  if (skipped > 0) {
+    lines.push('echo.');
+    lines.push(`echo 특수문자가 들어간 ${skipped}개는 건너뛰었습니다. 직접 바꿔주세요.`);
+  }
+  lines.push('echo.', 'echo 끝났습니다.', 'pause');
+  return lines.join('\r\n') + '\r\n';
+}
+
+// BOM 없는 UTF-8로 저장해야 cmd가 첫 줄을 제대로 읽는다
+function downloadBat(text, filename) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/octet-stream' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
 function downloadText(text, filename) {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
   const a = document.createElement('a');
@@ -1609,6 +1667,17 @@ async function run() {
     for (const r of allResults) renderResultRow(r);
     els.resultStats.textContent = T.batchDone(okResults.length, selectedFiles.length);
     els.downloadAllBtn.classList.toggle('hidden', okResults.length < 2);
+
+    // 이름이 실제로 바뀐 파일이 있으면 원본 미디어까지 한 번에 바꿔주는 .bat 을 제공한다
+    const renamePairs = allResults
+      .filter((r) => !r.error && r.translatedName && r.translatedName !== r.baseName)
+      .map((r) => ({ from: r.fileName, to: r.translatedName + fileExt(r.fileName) }));
+    if (els.renameBatBtn) {
+      els.renameBatBtn.classList.toggle('hidden', renamePairs.length === 0);
+      els.renameBatBtn.onclick = () =>
+        downloadBat(buildRenameBat(renamePairs), '이름바꾸기.bat');
+    }
+
     els.resultPanel.classList.remove('hidden');
   }
 
