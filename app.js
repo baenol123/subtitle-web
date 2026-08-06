@@ -50,6 +50,11 @@ const STRINGS = {
     groqError: (s, b) => `Groq API 오류 (${s}): ${b}`,
     srtParseError: 'SRT에서 자막 블록을 찾지 못했습니다.',
     refusal: '모델이 이 배치의 번역을 거부했습니다.',
+    thinkingRejected: (model) =>
+      `이 모델(${model})이 "추론 끄기" 설정을 받아들이지 않습니다.\n` +
+      '그대로 진행하면 번역에 불필요한 추론 토큰이 요금으로 청구되므로 중단했습니다.\n\n' +
+      '다른 모델을 선택하면 계속할 수 있습니다.\n' +
+      '이 메시지를 보셨다면 junsige29@gmail.com 으로 알려주시면 빠르게 고치겠습니다.',
     anthropicRateWait: (w) => `Anthropic 사용량 제한 — ${w}초 대기 후 재시도`,
     geminiRateWait: (w) => `Gemini 사용량 제한 — ${w}초 대기 후 재시도 (무료 티어는 분당 요청 제한이 있습니다)`,
     geminiKeySwitch: (i, n) => `Gemini 한도 도달 — 예비 키로 전환 (${i}/${n})`,
@@ -111,6 +116,11 @@ const STRINGS = {
     groqError: (s, b) => `Groq API error (${s}): ${b}`,
     srtParseError: 'No subtitle blocks found in the SRT file.',
     refusal: 'The model declined to translate this batch.',
+    thinkingRejected: (model) =>
+      `This model (${model}) does not accept the "disable reasoning" setting.\n` +
+      'Continuing would bill you for reasoning tokens this translation does not need, so it was stopped.\n\n' +
+      'Pick a different model to continue.\n' +
+      'If you see this, please let me know at junsige29@gmail.com and I will fix it quickly.',
     anthropicRateWait: (w) => `Anthropic rate limit — retrying in ${w}s`,
     geminiRateWait: (w) => `Gemini rate limit — retrying in ${w}s (the free tier has per-minute limits)`,
     geminiKeySwitch: (i, n) => `Gemini limit reached — switching to backup key (${i}/${n})`,
@@ -832,6 +842,10 @@ class GeminiFatalError extends Error {}
 // 재시도가 아니라 '분할해서 문제 줄만 골라내기'가 정답이다.
 class ContentRefusalError extends Error {}
 
+// 모델이 thinking:disabled 를 거부한 경우. 분할·재시도해도 결과가 같고,
+// 파라미터를 빼는 폴백은 추론을 오히려 켜서 요금을 물리므로 즉시 전체 중단한다.
+class ThinkingUnsupportedError extends Error {}
+
 // Gemini가 빈 응답을 준 이유 중 안전 필터에 해당하는 값들
 const REFUSAL_REASONS = /SAFETY|PROHIBITED|BLOCKLIST|RECITATION|IMAGE_SAFETY/i;
 
@@ -844,6 +858,7 @@ let splitBudget = SPLIT_BUDGET;
 function isFatalApiError(err) {
   return (
     err instanceof GeminiFatalError ||
+    err instanceof ThinkingUnsupportedError ||
     err instanceof Anthropic.AuthenticationError ||
     err instanceof Anthropic.PermissionDeniedError ||
     err instanceof Anthropic.NotFoundError
@@ -882,9 +897,8 @@ async function callClaude(prompt) {
       // (Opus 4.8 이하는 생략 = 꺼짐이었다.) 번역·교정에는 추론이 불필요한데
       // 사고 토큰이 출력 요금으로 과금되고, max_tokens 을 사고와 나눠 쓰게 되어
       // 긴 배치가 잘릴 수 있다. Gemini 쪽과 같은 이유로 명시적으로 끈다.
-      if (!rejects('thinking', model)) {
-        body.thinking = { type: 'disabled' };
-      }
+      // 거부되면 빼지 않고 중단한다 (아래 catch 참조) — 그래서 조건 없이 항상 보낸다.
+      body.thinking = { type: 'disabled' };
       if (!rejects('structuredOutput', model)) {
         body.output_config = { format: { type: 'json_schema', schema: TRANSLATION_SCHEMA } };
       }
@@ -895,13 +909,16 @@ async function callClaude(prompt) {
       const text = message.content.find((b) => b.type === 'text')?.text ?? '';
       return JSON.parse(extractJsonPayload(text));
     } catch (err) {
-      // 400이면 어떤 파라미터가 거부됐는지 메시지로 갈라내고, 그것만 빼고 재시도한다
+      // 400이면 어떤 파라미터가 거부됐는지 메시지로 갈라낸다
       if (err instanceof Anthropic.BadRequestError) {
         const detail = String(err.message ?? '');
-        if (/thinking/i.test(detail) && !rejects('thinking', model)) {
-          console.warn(`thinking 파라미터가 거부되어 제외하고 재시도합니다 (${model}):`, detail);
-          markRejected('thinking', model);
-          continue;
+        // thinking 만은 빼고 재시도하지 않는다.
+        // Opus 5 / Sonnet 5 부터 '생략 = 추론 켜짐'이라, 파라미터를 빼는 폴백은
+        // 끄려던 것을 오히려 켜서 사용자에게 조용히 요금을 물린다.
+        // 조용히 새는 것보다 멈추고 알리는 편이 낫다.
+        if (/thinking/i.test(detail)) {
+          console.error(`thinking:disabled 가 거부되었습니다 (${model}):`, detail);
+          throw new ThinkingUnsupportedError(T.thinkingRejected(model));
         }
         if (!rejects('structuredOutput', model)) {
           console.warn(`구조화 출력이 거부되어 일반 JSON 모드로 전환합니다 (${model}):`, detail);
