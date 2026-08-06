@@ -305,11 +305,26 @@ for (const key of PERSIST) {
   if (saved !== null) els[key].value = saved;
   els[key].addEventListener('change', () => localStorage.setItem(`subweb-${key}`, els[key].value));
 }
-// 지원 종료로 옵션에서 빠진 모델 id가 저장돼 있으면(select 값이 ''가 됨) 기본 모델로 되돌린다.
-// els.model 자체가 없을 수 있으므로(캐시된 옛 HTML) 위 PERSIST 루프와 같은 방식으로 방어한다.
-if (els.model && !els.model.value) {
-  els.model.value = 'gemini-3.1-flash-lite';
-  localStorage.setItem('subweb-model', els.model.value);
+// 세대 교체된 모델은 후속 모델로 옮겨준다. 이게 없으면 Claude를 쓰던 사용자가
+// 목록에서 사라진 id 때문에 조용히 Gemini 기본값으로 튕긴다.
+const MODEL_SUCCESSORS = {
+  'claude-opus-4-8': 'claude-opus-5',
+  'claude-opus-4-7': 'claude-opus-5',
+  'claude-opus-4-6': 'claude-opus-5',
+  'claude-sonnet-4-6': 'claude-sonnet-5',
+  'claude-sonnet-4-5': 'claude-sonnet-5',
+};
+if (els.model) {
+  const saved = localStorage.getItem('subweb-model');
+  if (saved && MODEL_SUCCESSORS[saved]) {
+    els.model.value = MODEL_SUCCESSORS[saved];
+    localStorage.setItem('subweb-model', els.model.value);
+  }
+  // 그래도 값이 없으면(완전히 사라진 모델) 기본 모델로 되돌린다
+  if (!els.model.value) {
+    els.model.value = 'gemini-3.1-flash-lite';
+    localStorage.setItem('subweb-model', els.model.value);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -863,6 +878,13 @@ async function callClaude(prompt) {
         max_tokens: 16000,
         messages: [{ role: 'user', content: prompt }],
       };
+      // Claude Opus 5 / Sonnet 5 부터는 thinking 을 생략하면 '켜짐'이 기본이다.
+      // (Opus 4.8 이하는 생략 = 꺼짐이었다.) 번역·교정에는 추론이 불필요한데
+      // 사고 토큰이 출력 요금으로 과금되고, max_tokens 을 사고와 나눠 쓰게 되어
+      // 긴 배치가 잘릴 수 있다. Gemini 쪽과 같은 이유로 명시적으로 끈다.
+      if (!rejects('thinking', model)) {
+        body.thinking = { type: 'disabled' };
+      }
       if (!rejects('structuredOutput', model)) {
         body.output_config = { format: { type: 'json_schema', schema: TRANSLATION_SCHEMA } };
       }
@@ -873,10 +895,19 @@ async function callClaude(prompt) {
       const text = message.content.find((b) => b.type === 'text')?.text ?? '';
       return JSON.parse(extractJsonPayload(text));
     } catch (err) {
-      if (err instanceof Anthropic.BadRequestError && !rejects('structuredOutput', model)) {
-        console.warn(`구조화 출력이 거부되어 일반 JSON 모드로 전환합니다 (${model}):`, err.message);
-        markRejected('structuredOutput', model);
-        continue;
+      // 400이면 어떤 파라미터가 거부됐는지 메시지로 갈라내고, 그것만 빼고 재시도한다
+      if (err instanceof Anthropic.BadRequestError) {
+        const detail = String(err.message ?? '');
+        if (/thinking/i.test(detail) && !rejects('thinking', model)) {
+          console.warn(`thinking 파라미터가 거부되어 제외하고 재시도합니다 (${model}):`, detail);
+          markRejected('thinking', model);
+          continue;
+        }
+        if (!rejects('structuredOutput', model)) {
+          console.warn(`구조화 출력이 거부되어 일반 JSON 모드로 전환합니다 (${model}):`, detail);
+          markRejected('structuredOutput', model);
+          continue;
+        }
       }
       if (err instanceof Anthropic.RateLimitError && attempt <= 3) {
         const wait = Number(err.headers?.get?.('retry-after')) || 30;
