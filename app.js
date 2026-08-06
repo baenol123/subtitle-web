@@ -1243,7 +1243,7 @@ async function refineBlocks(blocks) {
 //   "01.♥TR0_オープニング-男納射捕神社-1_SEless"
 //     → prefix "01.♥TR0_" / body "オープニング-男納射捕神社-1" / suffix "_SEless"
 //
-// 모델에는 body만 보내고 번역이 끝나면 prefix·suffix를 그대로 다시 붙인다.
+// 모델에는 body만 보낸다. prefix는 번역 후 그대로 다시 붙이고, suffix(효과음 표기)는 버린다.
 // 프롬프트로 "지우지 마"라고 부탁하는 방식과 달리 모델이 볼 수조차 없으므로 사라질 여지가 없다.
 // (실제로 프롬프트에는 이미 번호 유지 규칙이 있었지만 모델이 TR0_ 를 번호로 보지 않고 지웠고,
 //  그 결과 keepsNumbers 가 번역 전체를 폐기해 파일명이 하나도 안 바뀌었다.)
@@ -1256,9 +1256,12 @@ const NAME_PREFIX_TOKENS = [
   new RegExp(`^[[(#]?\\s*(?:EP|Episode)?\\s*\\d+(?:\\s*[-._~]\\s*\\d+)*\\s*[)\\]]?(?=[${AFFIX_MARK})\\]]|$)`, 'i'),  // 회차 번호
   new RegExp(`^(?:TR|Track|Disc|CD|Vol|SE)\\s*\\d*(?=[${AFFIX_MARK}]|$)`, 'i'), // 트랙·디스크 표기
 ];
+// 효과음 유무 표기. 괄호로 감싼 형태까지 인식한다: _SEless, (SEなし), 【効果音なし】 …
+const SE_MARK = '(?:SE\\s*(?:less|なし|無し|カット|cut|off|オフ|あり|有り|入り)?|no\\s*SE|効果音\\s*(?:なし|無し|カット|オフ|あり|有り|入り))';
 const NAME_SUFFIX_TOKENS = [
   new RegExp(`[${AFFIX_MARK}]+$`),
-  /[\s_\-–—.]*(?:SE\s*(?:less|なし|無し)|no\s*SE)$/i,                            // _SEless, SEなし …
+  new RegExp(`[\\s_\\-–—.]*[(（[［【〔]\\s*${SE_MARK}\\s*[)）\\]］】〕]$`, 'i'),      // (SEなし) 【効果音なし】
+  /[\s_\-–—.]*(?:SE\s*(?:less|なし|無し|カット|オフ|あり|有り|入り)|no\s*SE|効果音\s*(?:なし|無し|カット|オフ|あり|有り|入り))$/i,
   /[\s_\-–—.]+SE$/i,                                                            // 구분자가 앞에 있을 때만 맨 SE
 ];
 
@@ -1340,7 +1343,8 @@ function buildFileNamePrompt(items, opts) {
 
 /**
  * 선택된 파일 이름들을 한 번에 번역한다.
- *  - 회차 번호·트랙 표기·SE 꼬리는 모델에 보내지 않고 그대로 붙인다 (사라질 여지를 없앤다)
+ *  - 회차 번호·트랙 표기는 모델에 보내지 않고 그대로 붙이고, 효과음 표기는 떼어내 버린다
+ *    (단, 그 탓에 이름이 겹치면 겹치는 것들만 표기를 되살린다)
  *  - 마스킹 후 제목이 같으면 한 번만 번역해 재사용한다 → "4-1 방과후"와 "4-2 방과후"는 항상 같은 번역
  *  - 전체를 한 요청에 담아 모델이 다른 제목까지 참고해 용어를 맞추게 한다
  * 반환: Map(원본 baseName → 번역된 이름). 실패한 항목은 Map에 없다.
@@ -1384,10 +1388,29 @@ async function translateFileNames(baseNames) {
     else if (translated) console.warn(`파일명 번역에서 제목 안의 숫자가 어긋나 원본을 유지합니다: ${src} → ${translated}`);
   }
 
+  // 떼어낸 꼬리(_SEless 등)는 결과 이름에 다시 붙이지 않는다.
+  const proposed = new Map();                  // baseName → { prefix, translated, suffix, full }
+  const byFull = new Map();                    // 결과 이름 → [baseName…]
   for (const [name, { prefix, body, suffix }] of parts) {
     const translated = byTitle.get(body);
     if (!translated) continue;
-    const full = assembleFileName(prefix, translated, suffix);
+    const full = assembleFileName(prefix, translated, '');
+    proposed.set(name, { prefix, translated, suffix, full });
+    if (!byFull.has(full)) byFull.set(full, []);
+    byFull.get(full).push(name);
+  }
+
+  // 꼬리를 뗀 탓에 서로 다른 파일이 같은 이름이 되면(SE 있는 판/없는 판) 그 그룹만 꼬리를 되살린다.
+  // 그냥 두면 .bat 이 [이미 있음]으로 하나를 건너뛰어 이름 바꾸기를 놓친다.
+  for (const names of byFull.values()) {
+    if (names.length < 2) continue;
+    for (const name of names) {
+      const p = proposed.get(name);
+      p.full = assembleFileName(p.prefix, p.translated, p.suffix);
+    }
+  }
+
+  for (const [name, { full }] of proposed) {
     if (full && full !== name) out.set(name, full);
   }
   return out;
