@@ -1,5 +1,9 @@
 // esm.run은 리디렉션 별칭이라 최종 CDN 주소로 직접 로드 (Search Console 리디렉션 경고 방지)
-import Anthropic from 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk/+esm';
+//
+// ⚠ 버전을 반드시 고정할 것. 사용자의 API 키가 이 페이지의 localStorage에 있으므로,
+//    버전을 열어두면 SDK 패키지나 CDN이 오염됐을 때 전 사용자의 키가 유출될 수 있다.
+//    올릴 때는 실제로 동작을 확인한 뒤 이 숫자만 바꾼다.
+import Anthropic from 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.115.0/+esm';
 // ffmpeg 라이브러리는 CDN이 아니라 vendor 폴더에서 로드 —
 // 내부 워커가 같은 출처(same-origin)여야 정상 동작한다.
 import { FFmpeg } from './vendor/ffmpeg/index.js';
@@ -58,6 +62,7 @@ const STRINGS = {
     translating: (done, total) => `번역 중... ${done}/${total} 블록`,
     refining: (done, total) => `AI 교정 중... ${done}/${total} 블록`,
     refinedLabel: (n) => `${n}줄 수정`,
+    refineSkipped: (n) => `${n}줄 교정 못 함`,
     statsRefined: (n) => `교정 ${n}줄`,
     translatingFilename: '파일명 번역 중...',
     subtitleKind: '자막 → 번역만',
@@ -118,6 +123,7 @@ const STRINGS = {
     translating: (done, total) => `Translating... ${done}/${total} blocks`,
     refining: (done, total) => `Proofreading... ${done}/${total} blocks`,
     refinedLabel: (n) => `${n} line(s) fixed`,
+    refineSkipped: (n) => `${n} line(s) not proofread`,
     statsRefined: (n) => `${n} proofread`,
     translatingFilename: 'Translating file name...',
     subtitleKind: 'subtitle → translate only',
@@ -299,8 +305,9 @@ for (const key of PERSIST) {
   if (saved !== null) els[key].value = saved;
   els[key].addEventListener('change', () => localStorage.setItem(`subweb-${key}`, els[key].value));
 }
-// 지원 종료로 옵션에서 빠진 모델 id가 저장돼 있으면(select 값이 ''가 됨) 기본 모델로 되돌린다
-if (!els.model.value) {
+// 지원 종료로 옵션에서 빠진 모델 id가 저장돼 있으면(select 값이 ''가 됨) 기본 모델로 되돌린다.
+// els.model 자체가 없을 수 있으므로(캐시된 옛 HTML) 위 PERSIST 루프와 같은 방식으로 방어한다.
+if (els.model && !els.model.value) {
   els.model.value = 'gemini-3.1-flash-lite';
   localStorage.setItem('subweb-model', els.model.value);
 }
@@ -352,11 +359,15 @@ function checkCancelled() {
 
 function sleep(ms) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    abortController?.signal.addEventListener('abort', () => {
-      clearTimeout(timer);
-      reject(new Error(T.cancelled));
-    }, { once: true });
+    const signal = abortController?.signal;
+    // 정상 완료 시에도 리스너를 반드시 떼어낸다. 429 대기가 반복되는 긴 작업에서
+    // 같은 signal에 리스너가 계속 쌓이는 것을 막는다.
+    const onAbort = () => { clearTimeout(timer); reject(new Error(T.cancelled)); };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -642,7 +653,25 @@ function segmentsToBlocks(segments) {
   }));
 }
 
-const TIMESTAMP_RE = /^\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,.]\d{3}/;
+// SRT는 hh:mm:ss,mmm 이지만 WebVTT는 1시간 미만이면 시(hour)를 생략한 mm:ss.mmm 이 표준이다.
+// 시 부분과 자리수를 모두 느슨하게 받는다. 뒤에 붙는 큐 설정(align:start 등)은 그대로 무시된다.
+const TIME_RE_SRC = '(?:\\d{1,2}:)?\\d{1,2}:\\d{2}[,.]\\d{1,3}';
+const TIMESTAMP_RE = new RegExp(`^${TIME_RE_SRC}\\s*-->\\s*${TIME_RE_SRC}`);
+
+// "00:01.000" / "0:00:01,000" / "00:00:01.000" → 초
+function parseTimeToken(token) {
+  const parts = token.trim().replace(',', '.').split(':').map(Number);
+  const ms = parts.pop();                       // 마지막 조각은 ss.mmm
+  const sec = parts.reduce((acc, n) => acc * 60 + n, 0) * 60 + ms;
+  return Number.isFinite(sec) ? sec : 0;
+}
+
+// 입력이 VTT의 짧은 형식이어도 출력 SRT는 항상 hh:mm:ss,mmm 로 맞춘다.
+function normalizeTimestamp(line) {
+  const m = line.match(new RegExp(`^(${TIME_RE_SRC})\\s*-->\\s*(${TIME_RE_SRC})`));
+  if (!m) return line.trim();
+  return `${srtTime(parseTimeToken(m[1]))} --> ${srtTime(parseTimeToken(m[2]))}`;
+}
 
 function parseSrt(raw) {
   const chunks = raw.replace(/^﻿/, '').replace(/\r\n?/g, '\n').split(/\n{2,}/);
@@ -653,7 +682,7 @@ function parseSrt(raw) {
     if (tsIndex < 0) continue;
     const text = lines.slice(tsIndex + 1).join('\n').trim();
     if (!text) continue;
-    blocks.push({ timestamp: lines[tsIndex].trim(), text });
+    blocks.push({ timestamp: normalizeTimestamp(lines[tsIndex]), text });
   }
   if (blocks.length === 0) throw new Error(T.srtParseError);
   return blocks;
@@ -774,11 +803,27 @@ function salvageTranslations(text) {
   return out;
 }
 
-// 구조화 출력(output_config)이 400으로 거부되면 일반 JSON 모드로 자동 전환
-let structuredOutputSupported = true;
+// 파라미터가 거부된 사실을 '모델별로' 기억한다.
+// 전역 플래그로 두면 한 모델이 거부한 순간 다른 모델에서도 영영 안 보내게 되어,
+// thinking 억제 같은 비용 최적화가 조용히 무력화된다.
+const unsupported = { structuredOutput: new Set(), thinking: new Set(), safety: new Set() };
+const rejects = (kind, model) => unsupported[kind].has(model);
+const markRejected = (kind, model) => unsupported[kind].add(model);
 
 // Gemini의 키/모델 오류 — 재시도 무의미, 즉시 전체 중단용
 class GeminiFatalError extends Error {}
+
+// 안전 필터에 걸려 거부된 경우. 같은 내용을 다시 보내도 결과가 같으므로
+// 재시도가 아니라 '분할해서 문제 줄만 골라내기'가 정답이다.
+class ContentRefusalError extends Error {}
+
+// Gemini가 빈 응답을 준 이유 중 안전 필터에 해당하는 값들
+const REFUSAL_REASONS = /SAFETY|PROHIBITED|BLOCKLIST|RECITATION|IMAGE_SAFETY/i;
+
+// 분할 예산 — 거부가 여러 군데 흩어진 파일에서 요청 수가 폭발하는 것을 막는다.
+// 1000줄에서 거부 1건을 골라내는 데 약 10회가 필요하므로 40이면 3~4건까지 감당한다.
+const SPLIT_BUDGET = 40;
+let splitBudget = SPLIT_BUDGET;
 
 // 키 오류/모델 오류는 재시도·분할해봐야 소용없으니 즉시 전체 중단
 function isFatalApiError(err) {
@@ -809,27 +854,28 @@ function getAnthropicClient() {
 
 async function callClaude(prompt) {
   const client = getAnthropicClient();
+  const model = els.model.value;
   for (let attempt = 1; ; attempt++) {
     checkCancelled();
     try {
       const body = {
-        model: els.model.value,
+        model,
         max_tokens: 16000,
         messages: [{ role: 'user', content: prompt }],
       };
-      if (structuredOutputSupported) {
+      if (!rejects('structuredOutput', model)) {
         body.output_config = { format: { type: 'json_schema', schema: TRANSLATION_SCHEMA } };
       }
       const message = await client.messages.create(body, { signal: abortController.signal });
       if (message.stop_reason === 'refusal') {
-        throw new Error(T.refusal);
+        throw new ContentRefusalError(T.refusal);
       }
       const text = message.content.find((b) => b.type === 'text')?.text ?? '';
       return JSON.parse(extractJsonPayload(text));
     } catch (err) {
-      if (err instanceof Anthropic.BadRequestError && structuredOutputSupported) {
-        console.warn('구조화 출력이 거부되어 일반 JSON 모드로 전환합니다:', err.message);
-        structuredOutputSupported = false;
+      if (err instanceof Anthropic.BadRequestError && !rejects('structuredOutput', model)) {
+        console.warn(`구조화 출력이 거부되어 일반 JSON 모드로 전환합니다 (${model}):`, err.message);
+        markRejected('structuredOutput', model);
         continue;
       }
       if (err instanceof Anthropic.RateLimitError && attempt <= 3) {
@@ -851,8 +897,7 @@ function geminiThinkingConfig(model) {
   return null; // flash-lite 등은 기본 꺼짐
 }
 
-// thinking 파라미터가 미래 모델에서 거부되면 자동으로 빼고 재시도
-let geminiThinkingParamOk = true;
+// thinking 파라미터 거부 여부는 위의 unsupported.thinking 에 모델별로 기록한다.
 
 // 번역 도구 특성상 자막 원문·파일명이 안전 필터에 걸려 통째로 차단되는 일을 막는다.
 // 사용자 본인 콘텐츠의 번역이므로 필터를 최소로 (Google이 공식 제공하는 파라미터)
@@ -861,10 +906,10 @@ const GEMINI_SAFETY_OFF = [
   'HARM_CATEGORY_HATE_SPEECH',
   'HARM_CATEGORY_SEXUALLY_EXPLICIT',
   'HARM_CATEGORY_DANGEROUS_CONTENT',
+  'HARM_CATEGORY_CIVIC_INTEGRITY',   // 선거·정치 소재 자막이 기본 차단되는 것을 막는다
 ].map((category) => ({ category, threshold: 'BLOCK_NONE' }));
 
-// safetySettings를 거부하는 모델이면 자동으로 빼고 재시도
-let geminiSafetyParamOk = true;
+// safetySettings 거부 여부도 위의 unsupported.safety 에 모델별로 기록한다.
 
 // 입력된 Gemini 키 전체 (기본 + 예비). 한도 초과 시 순서대로 전환한다.
 // 무료 한도는 Google 계정 단위이므로 예비 키는 다른 계정에서 발급해야 효과가 있다.
@@ -887,8 +932,9 @@ async function callGemini(prompt) {
     checkCancelled();
     const key = keys[geminiKeyIndex % keys.length];
     const generationConfig = { responseMimeType: 'application/json', temperature: 0.2 };
-    const thinking = geminiThinkingParamOk ? geminiThinkingConfig(model) : null;
+    const thinking = rejects('thinking', model) ? null : geminiThinkingConfig(model);
     if (thinking) generationConfig.thinkingConfig = thinking;
+    const sendSafety = !rejects('safety', model);
 
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
@@ -898,7 +944,7 @@ async function callGemini(prompt) {
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
           generationConfig,
-          ...(geminiSafetyParamOk ? { safetySettings: GEMINI_SAFETY_OFF } : {}),
+          ...(sendSafety ? { safetySettings: GEMINI_SAFETY_OFF } : {}),
         }),
         signal: abortController.signal,
       }
@@ -909,15 +955,15 @@ async function callGemini(prompt) {
 
       // thinkingConfig를 거부하는 모델이면 파라미터를 빼고 한 번 더 시도
       if (res.status === 400 && thinking && /thinking/i.test(body)) {
-        console.warn('thinkingConfig가 거부되어 제외하고 재시도합니다:', body.slice(0, 200));
-        geminiThinkingParamOk = false;
+        console.warn(`thinkingConfig가 거부되어 제외하고 재시도합니다 (${model}):`, body.slice(0, 200));
+        markRejected('thinking', model);
         continue;
       }
 
       // safetySettings를 거부하는 모델이면 파라미터를 빼고 한 번 더 시도
-      if (res.status === 400 && geminiSafetyParamOk && /safety/i.test(body)) {
-        console.warn('safetySettings가 거부되어 제외하고 재시도합니다:', body.slice(0, 200));
-        geminiSafetyParamOk = false;
+      if (res.status === 400 && sendSafety && /safety/i.test(body)) {
+        console.warn(`safetySettings가 거부되어 제외하고 재시도합니다 (${model}):`, body.slice(0, 200));
+        markRejected('safety', model);
         continue;
       }
 
@@ -961,6 +1007,8 @@ async function callGemini(prompt) {
     const text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
     if (!text.trim()) {
       const reason = data.promptFeedback?.blockReason ?? data.candidates?.[0]?.finishReason ?? 'EMPTY';
+      // 안전 필터 차단이면 재시도해도 같은 결과 — 분할해서 문제 줄만 골라내야 한다
+      if (REFUSAL_REASONS.test(String(reason))) throw new ContentRefusalError(T.geminiEmpty(reason));
       throw new Error(T.geminiEmpty(reason));
     }
     // 파일 전체를 한 번에 보내므로 응답이 출력 길이 제한(MAX_TOKENS)으로 잘릴 수 있다.
@@ -1020,12 +1068,30 @@ async function translateBatchWithSplit(batch, opts) {
     });
   } catch (err) {
     if (cancelled || isFatalApiError(err)) throw err;
+    const message = err instanceof Error ? err.message : String(err);
     if (batch.length <= 1) {
-      return [{ id: batch[0].id, error: err instanceof Error ? err.message : String(err) }];
+      return [{ id: batch[0].id, error: message }];
     }
+
+    // 거부가 아닌 일시적 오류(5xx·네트워크·파싱)는 내용 문제가 아니므로 쪼개도 소용없다.
+    // 같은 배치로 한 번만 다시 보낸다 — Gemini는 배치가 파일 전체라, 여기서 바로
+    // 분할에 들어가면 요청 1회로 끝날 일이 수십 회로 번진다.
+    if (!(err instanceof ContentRefusalError) && !opts.retried) {
+      console.warn('일시적 오류로 보여 같은 배치를 한 번 더 시도합니다:', message);
+      await sleep(1500);
+      return translateBatchWithSplit(batch, { ...opts, retried: true });
+    }
+
+    // 분할 예산이 바닥나면 남은 줄은 통째로 실패 처리한다 (요청 폭발 방지)
+    if (splitBudget <= 0) {
+      console.warn(`분할 예산(${SPLIT_BUDGET})을 모두 사용해 ${batch.length}줄을 실패 처리합니다.`);
+      return batch.map((b) => ({ id: b.id, error: message }));
+    }
+    splitBudget--;
+
     const mid = Math.ceil(batch.length / 2);
-    const left = await translateBatchWithSplit(batch.slice(0, mid), opts);
-    const right = await translateBatchWithSplit(batch.slice(mid), opts);
+    const left = await translateBatchWithSplit(batch.slice(0, mid), { ...opts, retried: false });
+    const right = await translateBatchWithSplit(batch.slice(mid), { ...opts, retried: false });
     return [...left, ...right];
   }
 }
@@ -1041,6 +1107,7 @@ async function translateBlocks(blocks) {
   const translated = new Array(blocks.length);
   let failed = 0;
   let lastError = '';
+  splitBudget = SPLIT_BUDGET;   // 파일마다 분할 예산을 새로 준다
 
   const batchSize = isGeminiModel() ? items.length : BATCH_SIZE;
   for (let offset = 0; offset < items.length; offset += batchSize) {
@@ -1083,6 +1150,8 @@ async function refineBlocks(blocks) {
   const items = blocks.map((b, id) => ({ id, text: b.text }));
   const corrected = new Array(blocks.length);
   let changed = 0;
+  let skipped = 0;              // 거부·오류로 교정하지 못한 줄
+  splitBudget = SPLIT_BUDGET;
 
   const batchSize = isGeminiModel() ? items.length : REFINE_BATCH_SIZE;
   for (let offset = 0; offset < items.length; offset += batchSize) {
@@ -1102,6 +1171,9 @@ async function refineBlocks(blocks) {
 
     for (const r of results) {
       const original = items[r.id].text;
+      // 교정은 '고칠 줄만 반환'이 정상이므로 응답에 없는 줄은 정상(=고칠 것 없음)이다.
+      // 반면 error가 붙어 온 줄은 거부·오류로 검토 자체가 안 된 줄이라 따로 센다.
+      if (r.error) skipped++;
       const text = r.translation !== undefined && r.translation.trim() ? r.translation.trim() : original;
       if (text !== original) changed++;
       corrected[r.id] = text;
@@ -1111,6 +1183,7 @@ async function refineBlocks(blocks) {
   return {
     blocks: blocks.map((b, i) => ({ timestamp: b.timestamp, text: corrected[i] ?? b.text })),
     changed,
+    skipped,
   };
 }
 
@@ -1166,6 +1239,7 @@ function renderResultRow(result) {
       T.statsBlocks(result.blockCount),
       result.removed > 0 ? T.statsRemoved(result.removed) : '',
       result.refined > 0 ? T.statsRefined(result.refined) : '',
+      result.refineSkipped > 0 ? T.refineSkipped(result.refineSkipped) : '',
       result.failed > 0 ? T.statsFailed(result.failed, MANUAL_MARKER) : '',
       result.translatedName !== result.baseName ? T.statsFilename(result.translatedName) : '',
       result.renameFailed ? T.statsFilenameFailed : '',
@@ -1266,7 +1340,11 @@ async function processOne(file) {
       const refinement = await refineBlocks(blocks);
       blocks = refinement.blocks;
       result.refined = refinement.changed;
-      setStep('refine', 'done', refinement.changed > 0 ? T.refinedLabel(refinement.changed) : T.noIssues);
+      result.refineSkipped = refinement.skipped;
+      setStep('refine', 'done', [
+        refinement.changed > 0 ? T.refinedLabel(refinement.changed) : T.noIssues,
+        refinement.skipped > 0 ? T.refineSkipped(refinement.skipped) : '',
+      ].filter(Boolean).join(' · '));
     } else {
       setStep('refine', 'skipped');
     }
