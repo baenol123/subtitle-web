@@ -1311,6 +1311,35 @@ function splitNameAffixes(name) {
   return { prefix, tags, body, suffix };
 }
 
+// 제목 "안"에 섞인 장식 기호(♥ ⛩ ★ ♪ …)는 자리표시자로 바꿔 보내고 번역이 끝나면 되돌린다.
+// 그냥 보내면 모델이 조용히 지운다. {0} 같은 토큰은 문장이 아니라 구조로 읽혀 훨씬 잘 살아남고,
+// 앞뒤로 떼어내는 방식과 달리 모델이 문장 전체를 보므로 번역 품질도 유지된다.
+// 일반 문장부호(・、。＆)는 번역 대상이라 건드리지 않는다.
+// 범위는 U+2190(←) ~ U+2BFF(⯿) — 화살표·수학기호·딩벳·기타기호. 이모지는 뒤쪽 속성으로 잡는다.
+const BODY_SYMBOL = /[←-⯿]|\p{Extended_Pictographic}/gu;
+const PLACEHOLDER = /\{(\d+)\}/g;
+
+function maskSymbols(text) {
+  const src = String(text ?? '');
+  if (/\{\d+\}/.test(src)) return { masked: src, marks: [] };   // 원문에 이미 있으면 손대지 않는다
+  const marks = [];
+  const masked = src.replace(BODY_SYMBOL, (m) => `{${marks.push(m) - 1}}`);
+  return { masked, marks };
+}
+
+// 자리표시자를 기호로 되돌린다. 모델이 일부를 빼먹었으면 그 기호만 사라지고 번역은 살린다.
+function restoreSymbols(text, marks) {
+  if (!marks.length) return { text, lost: 0 };
+  const seen = new Set();
+  const out = String(text).replace(PLACEHOLDER, (m, i) => {
+    const n = Number(i);
+    if (!(n in marks)) return '';
+    seen.add(n);
+    return marks[n];
+  });
+  return { text: out, lost: marks.length - seen.size };
+}
+
 const MAX_FILE_NAME = 80;
 
 function cleanNamePart(text) {
@@ -1347,6 +1376,7 @@ function buildFileNamePrompt(items, opts) {
     '- Include exactly one translation for every input id.',
     '- Translate as a natural, concise title. Plain text only — no quotes, no slashes, no file extension.',
     '- Keep every number exactly as it appears, in the same position. Do not renumber or drop numbers.',
+    '- Tokens like {0} or {1} are placeholders standing in for symbols. Copy each one through unchanged and in the same relative position. Never add, drop, renumber, reorder, or translate them.',
     '- Names: use the conventional target-language form for real, established places, people, works, and brands.',
     '- If a name is clearly invented or a play on words, translate what it means rather than spelling out its sound. A sound-only rendering leaves the reader with a string they cannot parse. When unsure whether a name is real, transliterate.',
     '- Ordinary words, slang, and abbreviations are not names. Translate them normally; the invented-name rule does not apply to them.',
@@ -1375,9 +1405,10 @@ async function translateFileNames(baseNames) {
   const titles = [];                           // 중복 제거된 제목(body)
   for (const name of baseNames) {
     const p = splitNameAffixes(name);
+    Object.assign(p, maskSymbols(p.body));     // p.masked / p.marks
     parts.set(name, p);
     for (const t of p.tags) if (t.text && !titles.includes(t.text)) titles.push(t.text);
-    if (!titles.includes(p.body)) titles.push(p.body);
+    if (!titles.includes(p.masked)) titles.push(p.masked);
   }
   if (titles.length === 0) return out;
 
@@ -1399,22 +1430,26 @@ async function translateFileNames(baseNames) {
     return out;
   }
 
-  // 제목 → 번역 (같은 제목은 한 항목이므로 자동으로 동일한 결과가 된다)
+  // 자리표시자가 박힌 채로 보관한다. 되돌리기는 파일별로 자기 marks 를 써야 한다.
   const byTitle = new Map();
   for (const r of results) {
     if (r.translation === undefined) continue;
-    const src = titles[r.id];
     const translated = cleanNamePart(applyCorrections(r.translation, corrections)).trim();
-    if (translated && keepsNumbers(src, translated)) byTitle.set(src, translated);
-    else if (translated) console.warn(`파일명 번역에서 제목 안의 숫자가 어긋나 원본을 유지합니다: ${src} → ${translated}`);
+    if (translated) byTitle.set(titles[r.id], translated);
   }
 
   // 떼어낸 꼬리(_SEless 등)는 결과 이름에 다시 붙이지 않는다.
   const proposed = new Map();                  // baseName → { prefix, translated, suffix, full }
   const byFull = new Map();                    // 결과 이름 → [baseName…]
-  for (const [name, { prefix, tags, body, suffix }] of parts) {
-    const translated = byTitle.get(body);
-    if (!translated) continue;
+  for (const [name, { prefix, tags, body, masked, marks, suffix }] of parts) {
+    const raw = byTitle.get(masked);
+    if (raw === undefined) continue;
+    const { text: translated, lost } = restoreSymbols(raw, marks);
+    if (lost) console.warn(`파일명 번역에서 기호 ${lost}개가 사라졌습니다: ${body} → ${translated}`);
+    if (!keepsNumbers(body, translated)) {
+      console.warn(`파일명 번역에서 제목 안의 숫자가 어긋나 원본을 유지합니다: ${body} → ${translated}`);
+      continue;
+    }
     // 말머리는 원래 괄호를 그대로 쓰고 안쪽만 번역된 것으로 바꾼다.
     const head = tags.map((t) => t.open + (byTitle.get(t.text) ?? t.text) + t.close + t.gap).join('');
     const full = assembleFileName(prefix, head + translated, '');
