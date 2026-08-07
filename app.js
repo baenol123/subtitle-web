@@ -1488,8 +1488,14 @@ async function translateFileNames(baseNames) {
 // 인코딩: 원본이 일본어, 결과가 한국어라 어떤 단일 ANSI 코드페이지로도 둘 다 담을 수 없다.
 // UTF-8(BOM 없음) + `chcp 65001` 조합으로 실제 동작을 확인했다. BOM이 있으면 첫 줄이 깨진다.
 
-// cmd에서 특수한 의미를 갖는 문자가 이름에 있으면 ren이 오작동할 수 있다.
-const BAT_UNSAFE = /[%!^&<>|"]/;
+// 파일명에 들어갈 수 있으면서 cmd에서 특수한 의미를 갖는 문자는 % ! ^ & 넷뿐이다.
+// (< > | " * ? : / \ 는 NTFS가 파일명으로 허용하지 않고, 번역 결과에서도 cleanNamePart 가 지운다.)
+//
+// 실측 결과:
+//   & ! → 따옴표 안에서 안전. echo 도 "%~1" 처럼 감싸면 그대로 출력된다.
+//   ^   → call 이 인자를 한 번 더 파싱하면서 캐럿이 이중화된다(car^y → car^^y). 못 쓴다.
+//   %   → 어느 위치에서도 변수 확장으로 먹힌다. 못 쓴다.
+const BAT_UNSAFE = /[%^"]/;
 
 // 정확한 이름이 없을 때 쓸 대체 탐색 패턴. "01.♥TR0_" 처럼 회차·트랙 표기가 있을 때만 만든다.
 // SE 있는 판과 없는 판은 파일명이 _SEless 하나만 다른 게 아니라 -1 이 빠지거나 언더바가
@@ -1517,7 +1523,7 @@ function buildRenameBat(pairs) {
     if (from === to) continue;
     // 이름에 cmd 특수문자가 있으면 안전하게 건너뛰고 사람이 직접 처리하게 남긴다
     if (BAT_UNSAFE.test(from) || BAT_UNSAFE.test(to)) {
-      lines.push(`echo [건너뜀] ${from.replace(/[%!^&<>|"]/g, '?')}`);
+      lines.push(`echo [건너뜀] "${from.replace(/[%^"]/g, '?')}"`);
       skipped++;
       continue;
     }
@@ -1540,14 +1546,15 @@ function buildRenameBat(pairs) {
     'exit /b',
     '',
     // %1 원본 이름  %2 바꿀 이름  %3 대체 탐색 패턴(없으면 빈 문자열)
+    // 이름은 반드시 따옴표로 감싸 출력한다. 감싸지 않으면 & 가 든 이름에서 줄이 잘린다.
     // `if defined` 는 지연확장 없이도 런타임에 평가되므로 for 안에서 후보 수를 셀 수 있다.
     ':try',
     'if exist "%~2" (',
-    '  echo [이미 있음] %~2',
+    '  echo [이미 있음] "%~2"',
     '  goto :eof',
     ')',
     'if exist "%~1" (',
-    '  ren "%~1" "%~2" && echo [완료] %~2 || echo [실패] %~1',
+    '  ren "%~1" "%~2" && echo [완료] "%~2" || echo [실패] "%~1"',
     '  goto :eof',
     ')',
     'if "%~3"=="" goto :notfound',
@@ -1556,14 +1563,14 @@ function buildRenameBat(pairs) {
     'for %%f in ("%~3") do if defined cand (set "dup=1") else (set "cand=%%f")',
     'if not defined cand goto :notfound',
     'if defined dup (',
-    '  echo [모호함] %~3 에 해당하는 파일이 여러 개라 건너뜁니다',
+    '  echo [모호함] "%~3" 에 해당하는 파일이 여러 개라 건너뜁니다',
     '  goto :eof',
     ')',
-    'ren "%cand%" "%~2" && echo [유사일치] %~2   [원본 %cand%] || echo [실패] %cand%',
+    'ren "%cand%" "%~2" && echo [유사일치] "%~2"   [원본 "%cand%"] || echo [실패] "%cand%"',
     'goto :eof',
     '',
     ':notfound',
-    'echo [없음] %~1',
+    'echo [없음] "%~1"',
     'set /a missing+=1',
     'goto :eof',
   );
