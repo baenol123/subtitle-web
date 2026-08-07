@@ -1491,6 +1491,16 @@ async function translateFileNames(baseNames) {
 // cmd에서 특수한 의미를 갖는 문자가 이름에 있으면 ren이 오작동할 수 있다.
 const BAT_UNSAFE = /[%!^&<>|"]/;
 
+// 정확한 이름이 없을 때 쓸 대체 탐색 패턴. "01.♥TR0_" 처럼 회차·트랙 표기가 있을 때만 만든다.
+// SE 있는 판과 없는 판은 파일명이 _SEless 하나만 다른 게 아니라 -1 이 빠지거나 언더바가
+// 사라지기도 해서 단순 치환으로는 못 맞춘다. 트랙 표기는 두 판에서 항상 같으므로 이걸 키로 쓴다.
+function matchPattern(from, key) {
+  if (!key || !/\d/.test(key)) return '';               // 숫자가 없으면 키로 못 쓴다
+  if (/[*?]/.test(key) || BAT_UNSAFE.test(key)) return '';
+  const ext = from.match(/\.[^.]+$/)?.[0] ?? '';
+  return key + '*' + ext;
+}
+
 function buildRenameBat(pairs) {
   const lines = [
     '@echo off',
@@ -1503,7 +1513,7 @@ function buildRenameBat(pairs) {
     'echo.',
   ];
   let skipped = 0;
-  for (const { from, to } of pairs) {
+  for (const { from, to, key } of pairs) {
     if (from === to) continue;
     // 이름에 cmd 특수문자가 있으면 안전하게 건너뛰고 사람이 직접 처리하게 남긴다
     if (BAT_UNSAFE.test(from) || BAT_UNSAFE.test(to)) {
@@ -1511,14 +1521,7 @@ function buildRenameBat(pairs) {
       skipped++;
       continue;
     }
-    lines.push(`if exist "${to}" (`);
-    lines.push(`  echo [이미 있음] ${to}`);
-    lines.push(`) else if exist "${from}" (`);
-    lines.push(`  ren "${from}" "${to}" && echo [완료] ${to} || echo [실패] ${from}`);
-    lines.push(`) else (`);
-    lines.push(`  echo [없음] ${from}`);
-    lines.push(`  set /a missing+=1`);
-    lines.push(`)`);
+    lines.push(`call :try "${from}" "${to}" "${matchPattern(from, key)}"`);
   }
   if (skipped > 0) {
     lines.push('echo.');
@@ -1534,6 +1537,35 @@ function buildRenameBat(pairs) {
     ')',
     'echo 끝났습니다.',
     'pause',
+    'exit /b',
+    '',
+    // %1 원본 이름  %2 바꿀 이름  %3 대체 탐색 패턴(없으면 빈 문자열)
+    // `if defined` 는 지연확장 없이도 런타임에 평가되므로 for 안에서 후보 수를 셀 수 있다.
+    ':try',
+    'if exist "%~2" (',
+    '  echo [이미 있음] %~2',
+    '  goto :eof',
+    ')',
+    'if exist "%~1" (',
+    '  ren "%~1" "%~2" && echo [완료] %~2 || echo [실패] %~1',
+    '  goto :eof',
+    ')',
+    'if "%~3"=="" goto :notfound',
+    'set "cand="',
+    'set "dup="',
+    'for %%f in ("%~3") do if defined cand (set "dup=1") else (set "cand=%%f")',
+    'if not defined cand goto :notfound',
+    'if defined dup (',
+    '  echo [모호함] %~3 에 해당하는 파일이 여러 개라 건너뜁니다',
+    '  goto :eof',
+    ')',
+    'ren "%cand%" "%~2" && echo [유사일치] %~2   [원본 %cand%] || echo [실패] %cand%',
+    'goto :eof',
+    '',
+    ':notfound',
+    'echo [없음] %~1',
+    'set /a missing+=1',
+    'goto :eof',
   );
   return lines.join('\r\n') + '\r\n';
 }
@@ -1810,7 +1842,11 @@ async function run() {
     // 이름이 실제로 바뀐 파일이 있으면 원본 미디어까지 한 번에 바꿔주는 .bat 을 제공한다
     const renamePairs = allResults
       .filter((r) => !r.error && r.translatedName && r.translatedName !== r.baseName)
-      .map((r) => ({ from: r.fileName, to: r.translatedName + fileExt(r.fileName) }));
+      .map((r) => ({
+        from: r.fileName,
+        to: r.translatedName + fileExt(r.fileName),
+        key: splitNameAffixes(r.baseName).prefix,   // "01.♥TR0_" — 다른 판을 찾을 때 쓰는 키
+      }));
     if (els.renameBatBtn) {
       els.renameBatBtn.classList.toggle('hidden', renamePairs.length === 0);
       els.renameBatBtn.onclick = () =>
