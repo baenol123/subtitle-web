@@ -62,6 +62,7 @@ const STRINGS = {
     geminiRateWait: (w) => `Gemini 사용량 제한 — ${w}초 대기 후 재시도 (무료 티어는 분당 요청 제한이 있습니다)`,
     geminiKeySwitch: (i, n) => `Gemini 한도 도달 — 예비 키로 전환 (${i}/${n})`,
     geminiDailyLimit: 'Gemini 무료 일일 한도가 소진되었습니다 (매일 태평양 시간 자정, 한국 시간 오후 4~5시경 초기화). 다른 Google 계정의 예비 키를 추가하거나 모델을 바꾸면 계속할 수 있습니다. 완료된 파일의 결과는 아래에서 받을 수 있습니다.',
+    anthropicCreditExhausted: 'Anthropic 계정의 크레딧이 부족합니다. 완료된 파일의 결과는 아래에서 받을 수 있으니 먼저 다운로드해두세요. 크레딧을 충전한 뒤, 아직 처리되지 않은 나머지 파일만 다시 선택해서 이어서 실행하면 됩니다 (이미 끝난 파일까지 다시 선택하면 처음부터 다시 처리되니 주의하세요).',
     geminiRateGiveUp: '여러 번 기다려도 Gemini 429가 계속됩니다. 무료 키에서는 이 모델의 한도가 사실상 0일 수 있습니다 — 모델을 Gemini 3.1 Flash-Lite로 바꾸거나, 결제 계정 키를 사용하세요. 완료된 파일의 결과는 아래에서 받을 수 있습니다.',
     geminiError: (s, b) => `Gemini API 오류 (${s}): ${b}`,
     geminiEmpty: (r) => `Gemini가 응답을 반환하지 않았습니다 (${r})`,
@@ -129,6 +130,7 @@ const STRINGS = {
     geminiRateWait: (w) => `Gemini rate limit — retrying in ${w}s (the free tier has per-minute limits)`,
     geminiKeySwitch: (i, n) => `Gemini limit reached — switching to backup key (${i}/${n})`,
     geminiDailyLimit: 'Your Gemini free daily quota is exhausted (it resets at midnight Pacific Time). Add a backup key from a different Google account or switch models to continue. Results for completed files are available below.',
+    anthropicCreditExhausted: 'Your Anthropic account is out of credit. Results for completed files are available below — download them first. After topping up, reselect only the remaining, not-yet-processed files and run again (reselecting files that already finished will redo them from scratch).',
     geminiRateGiveUp: 'Gemini keeps returning 429 despite repeated waits. On free keys this model may have effectively zero quota — switch to Gemini 3.1 Flash-Lite or use a key with billing enabled. Results for completed files are available below.',
     geminiError: (s, b) => `Gemini API error (${s}): ${b}`,
     geminiEmpty: (r) => `Gemini returned no response (${r})`,
@@ -922,6 +924,10 @@ class ContentRefusalError extends Error {}
 // 파라미터를 빼는 폴백은 추론을 오히려 켜서 요금을 물리므로 즉시 전체 중단한다.
 class ThinkingUnsupportedError extends Error {}
 
+// Anthropic 계정 크레딧 소진. 분할해서 재시도해도 매번 같은 400이 나므로
+// (남은 파일 수만큼 헛요청만 쌓인다) 발견 즉시 전체 중단한다.
+class AnthropicFatalError extends Error {}
+
 // Gemini가 빈 응답을 준 이유 중 안전 필터에 해당하는 값들
 const REFUSAL_REASONS = /SAFETY|PROHIBITED|BLOCKLIST|RECITATION|IMAGE_SAFETY/i;
 
@@ -935,6 +941,7 @@ function isFatalApiError(err) {
   return (
     err instanceof GeminiFatalError ||
     err instanceof ThinkingUnsupportedError ||
+    err instanceof AnthropicFatalError ||
     err instanceof Anthropic.AuthenticationError ||
     err instanceof Anthropic.PermissionDeniedError ||
     err instanceof Anthropic.NotFoundError
@@ -988,6 +995,10 @@ async function callClaude(prompt) {
       // 400이면 어떤 파라미터가 거부됐는지 메시지로 갈라낸다
       if (err instanceof Anthropic.BadRequestError) {
         const detail = String(err.message ?? '');
+        // 크레딧 소진은 내용과 무관하게 항상 같은 응답이 온다 — 분할 재시도는 헛수고이므로 즉시 중단
+        if (/credit balance/i.test(detail)) {
+          throw new AnthropicFatalError(T.anthropicCreditExhausted);
+        }
         // thinking 만은 빼고 재시도하지 않는다.
         // Opus 5 / Sonnet 5 부터 '생략 = 추론 켜짐'이라, 파라미터를 빼는 폴백은
         // 끄려던 것을 오히려 켜서 사용자에게 조용히 요금을 물린다.
