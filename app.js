@@ -26,6 +26,9 @@ const CONTEXT_WINDOW = 3;       // 앞뒤 참고 블록 수
 const MAX_REPEAT = 2;           // 같은 문장 연속 반복 허용 횟수
 const AUDIO_DIRECT_EXTS = ['.mp3', '.m4a', '.wav', '.ogg', '.opus', '.flac', '.webm'];
 const SUBTITLE_EXTS = ['.srt', '.vtt'];
+const VIDEO_EXTS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.wmv', '.flv', '.ts', '.m2ts', '.mpg', '.mpeg'];
+// 폴더째 선택/드롭할 때는 accept 속성이 적용되지 않으므로 확장자로 직접 걸러낸다
+const FOLDER_PICK_EXTS = new Set([...SUBTITLE_EXTS, ...AUDIO_DIRECT_EXTS, ...VIDEO_EXTS]);
 
 // ─────────────────────────────────────────────────────────────
 // 다국어 문자열 — 페이지의 <html lang="..">에 따라 선택된다
@@ -76,6 +79,7 @@ const STRINGS = {
     needGroqKey: '자막 추출에는 Groq API 키가 필요합니다.',
     needAnthropicKey: '번역에는 Anthropic API 키가 필요합니다.',
     nothingToDo: 'SRT 파일 + "추출만" 조합은 할 일이 없습니다.',
+    folderNoMedia: '선택한 폴더에서 지원되는 영상/오디오/자막 파일을 찾지 못했습니다.',
     noSubtitles: '추출된 자막이 없습니다. 음성이 있는 파일인지 확인해주세요.',
     chunkProgress: (i, n) => `자막 추출 중... 조각 ${i}/${n}`,
     chunksLabel: (n) => `${n}개 조각`,
@@ -142,6 +146,7 @@ const STRINGS = {
     needGroqKey: 'A Groq API key is required for subtitle extraction.',
     needAnthropicKey: 'An Anthropic API key is required for translation.',
     nothingToDo: 'SRT file + "extract only" leaves nothing to do.',
+    folderNoMedia: 'No supported video/audio/subtitle files were found in the selected folder.',
     noSubtitles: 'No subtitles were extracted. Please check that the file contains speech.',
     chunkProgress: (i, n) => `Extracting subtitles... chunk ${i}/${n}`,
     chunksLabel: (n) => `${n} chunk(s)`,
@@ -270,6 +275,7 @@ const els = {
   skipTranslate: $('skipTranslate'), renameKorean: $('renameKorean'), aiRefine: $('aiRefine'),
   styleGuide: $('styleGuide'), glossary: $('glossary'), corrections: $('corrections'),
   dropZone: $('dropZone'), fileInput: $('fileInput'), fileInfo: $('fileInfo'),
+  folderInput: $('folderInput'), folderPickBtn: $('folderPickBtn'),
   startBtn: $('startBtn'), cancelBtn: $('cancelBtn'),
   progressPanel: $('progressPanel'), steps: $('steps'),
   progressBar: $('progressBar'), statusLine: $('statusLine'),
@@ -411,13 +417,69 @@ function isSubtitleFile(file) {
   return SUBTITLE_EXTS.includes(fileExt(file.name));
 }
 
-function handleFiles(files) {
-  if (running || files.length === 0) return;
-  selectedFiles = Array.from(files);
+function relDirOf(file) {
+  const rel = file.webkitRelativePath || '';
+  const idx = rel.lastIndexOf('/');
+  return idx >= 0 ? rel.slice(0, idx) : '';
+}
+
+function isPickableMediaExt(name) {
+  return FOLDER_PICK_EXTS.has(fileExt(name));
+}
+
+// 폴더 안의 파일을 재귀적으로 수집 — <input webkitdirectory>가 주는 File에는
+// webkitRelativePath가 자동으로 붙지만, 드래그&드롭으로 받은 File에는 없으므로 직접 채워 넣는다.
+function readEntry(entry, path) {
+  return new Promise((resolve) => {
+    if (entry.isFile) {
+      entry.file((file) => {
+        try {
+          Object.defineProperty(file, 'webkitRelativePath', { value: path + file.name, configurable: true });
+        } catch {
+          // 재정의가 막힌 브라우저라면 폴더 구조 정보 없이 진행 (필터링/구조 보존만 못함)
+        }
+        resolve([file]);
+      }, () => resolve([]));
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const collected = [];
+      const readBatch = () => {
+        reader.readEntries(async (entries) => {
+          if (entries.length === 0) { resolve(collected); return; }
+          for (const e of entries) collected.push(...await readEntry(e, `${path}${entry.name}/`));
+          readBatch(); // 디렉터리가 크면 한 번에 다 안 줄 수 있어 빌 때까지 반복
+        }, () => resolve(collected));
+      };
+      readBatch();
+    } else {
+      resolve([]);
+    }
+  });
+}
+
+async function collectDroppedFiles(dataTransfer) {
+  const items = dataTransfer.items ? Array.from(dataTransfer.items) : [];
+  const entries = items.map((it) => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+  if (entries.length === 0) return { files: Array.from(dataTransfer.files), hasFolder: false };
+  const hasFolder = entries.some((e) => e.isDirectory);
+  const groups = await Promise.all(entries.map((e) => readEntry(e, '')));
+  return { files: groups.flat(), hasFolder };
+}
+
+function handleFiles(files, opts = {}) {
+  if (running) return;
+  let list = Array.from(files);
+  if (list.length === 0) return;
+  if (opts.filterExts) {
+    list = list.filter((f) => isPickableMediaExt(f.name));
+    if (list.length === 0) { showError(T.folderNoMedia); return; }
+  }
+  selectedFiles = list;
   const totalMb = (selectedFiles.reduce((sum, f) => sum + f.size, 0) / 1e6).toFixed(1);
   const lines = selectedFiles.map((f) => {
     const kind = isSubtitleFile(f) ? T.subtitleKind : T.mediaKind;
-    return `• ${f.name} (${(f.size / 1e6).toFixed(1)} MB) — ${kind}`;
+    const path = relDirOf(f) ? `${relDirOf(f)}/` : '';
+    return `• ${path}${f.name} (${(f.size / 1e6).toFixed(1)} MB) — ${kind}`;
   });
   els.fileInfo.innerHTML = '';
   els.fileInfo.append(
@@ -432,11 +494,20 @@ els.dropZone.addEventListener('click', () => els.fileInput.click());
 els.fileInput.addEventListener('change', () => handleFiles(els.fileInput.files));
 els.dropZone.addEventListener('dragover', (e) => { e.preventDefault(); els.dropZone.classList.add('dragover'); });
 els.dropZone.addEventListener('dragleave', () => els.dropZone.classList.remove('dragover'));
-els.dropZone.addEventListener('drop', (e) => {
+els.dropZone.addEventListener('drop', async (e) => {
   e.preventDefault();
   els.dropZone.classList.remove('dragover');
-  handleFiles(e.dataTransfer.files);
+  const { files, hasFolder } = await collectDroppedFiles(e.dataTransfer);
+  handleFiles(files, { filterExts: hasFolder });
 });
+
+if (els.folderPickBtn) {
+  els.folderPickBtn.addEventListener('click', (e) => {
+    e.stopPropagation(); // dropZone의 클릭 핸들러(파일 선택 열기)로 안 번지게
+    els.folderInput.click();
+  });
+  els.folderInput.addEventListener('change', () => handleFiles(els.folderInput.files, { filterExts: true }));
+}
 
 // ─────────────────────────────────────────────────────────────
 // 1단계: 오디오 추출 (ffmpeg.wasm)
@@ -1577,9 +1648,8 @@ function buildRenameBat(pairs) {
   return lines.join('\r\n') + '\r\n';
 }
 
-// BOM 없는 UTF-8로 저장해야 cmd가 첫 줄을 제대로 읽는다
-function downloadBat(text, filename) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'application/octet-stream' }));
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
@@ -1587,13 +1657,107 @@ function downloadBat(text, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
+// BOM 없는 UTF-8로 저장해야 cmd가 첫 줄을 제대로 읽는다
+function downloadBat(text, filename) {
+  triggerDownload(new Blob([text], { type: 'application/octet-stream' }), filename);
+}
+
 function downloadText(text, filename) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  triggerDownload(new Blob([text], { type: 'text/plain;charset=utf-8' }), filename);
+}
+
+// ─────────────────────────────────────────────────────────────
+// ZIP 생성 (외부 라이브러리 없이 — 저장 전용, 폴더 구조를 그대로 보존)
+// ─────────────────────────────────────────────────────────────
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function dosDateTime(date) {
+  const time = ((date.getHours() & 0x1f) << 11) | ((date.getMinutes() & 0x3f) << 5) | ((date.getSeconds() >> 1) & 0x1f);
+  const dosDate = (((date.getFullYear() - 1980) & 0x7f) << 9) | (((date.getMonth() + 1) & 0xf) << 5) | (date.getDate() & 0x1f);
+  return { time, dosDate };
+}
+
+// entries: [{ name: '상대/경로/파일.srt', text: string }] — 압축 없이 저장(store)만 하는 최소 ZIP
+function buildZip(entries) {
+  const encoder = new TextEncoder();
+  const { time, dosDate } = dosDateTime(new Date());
+  const parts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  for (const { name, text } of entries) {
+    const nameBytes = encoder.encode(name);
+    const data = encoder.encode(text);
+    const crc = crc32(data);
+
+    const local = new Uint8Array(30 + nameBytes.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true); // UTF-8 파일명 플래그 (한글/일본어 경로 보존)
+    lv.setUint16(8, 0, true); // 압축 없음(store)
+    lv.setUint16(10, time, true);
+    lv.setUint16(12, dosDate, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, data.length, true);
+    lv.setUint32(22, data.length, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true);
+    local.set(nameBytes, 30);
+    parts.push(local, data);
+
+    const central = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(central.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, time, true);
+    cv.setUint16(14, dosDate, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, offset, true);
+    central.set(nameBytes, 46);
+    centralParts.push(central);
+
+    offset += local.length + data.length;
+  }
+
+  const centralStart = offset;
+  const centralSize = centralParts.reduce((sum, c) => sum + c.length, 0);
+
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, entries.length, true);
+  ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, centralStart, true);
+
+  return new Blob([...parts, ...centralParts, end], { type: 'application/zip' });
 }
 
 function renderResultRow(result) {
@@ -1643,6 +1807,21 @@ function renderResultRow(result) {
 }
 
 els.downloadAllBtn.addEventListener('click', async () => {
+  // 폴더째 선택한 경우 zip 하나로 묶어서 내려받는다 — 압축을 풀면 원래 폴더 구조 그대로
+  // (영상과 같은 폴더에) SRT가 놓여 플레이어가 자동으로 자막을 찾는다.
+  const withFolder = allResults.some((r) => r.relDir);
+  if (withFolder) {
+    const entries = allResults
+      .filter((r) => r.translatedSrt || r.originalSrt)
+      .map((r) => {
+        const text = r.translatedSrt || r.originalSrt;
+        const name = r.translatedSrt ? r.translatedName : r.baseName;
+        const prefix = r.relDir ? `${r.relDir}/` : '';
+        return { name: `${prefix}${name}.srt`, text };
+      });
+    triggerDownload(buildZip(entries), 'subtitles.zip');
+    return;
+  }
   for (const r of allResults) {
     if (r.translatedSrt) {
       downloadText(r.translatedSrt, `${r.translatedName}.srt`);
@@ -1666,6 +1845,7 @@ async function processOne(file) {
     fileName: file.name,
     baseName,
     translatedName: baseName,
+    relDir: relDirOf(file), // 폴더째 선택한 경우의 하위 경로 — zip 다운로드 시 구조 보존에 쓰인다
     originalSrt: '',
     translatedSrt: '',
     blockCount: 0,

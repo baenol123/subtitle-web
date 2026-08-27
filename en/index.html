@@ -173,10 +173,13 @@
     <section class="panel" aria-labelledby="file-h">
       <h2 id="file-h">3. File</h2>
       <div id="dropZone" class="drop-zone">
-        <strong>Drag video / audio / SRT files here, or click to select (multiple allowed)</strong>
+        <strong>Drag video / audio / SRT files here, or click to select (multiple allowed, or drag a whole folder)</strong>
         <span class="meta">mp4 · mkv · webm · avi · mp3 · m4a · wav · ogg · srt — upload an SRT to translate only</span>
+        <button type="button" id="folderPickBtn" class="folder-pick-btn">Select an entire folder (including subfolders)</button>
         <input type="file" id="fileInput" accept="video/*,audio/*,.srt,.vtt,.mkv,.avi" multiple hidden />
+        <input type="file" id="folderInput" webkitdirectory multiple hidden />
       </div>
+      <p class="meta">Selecting a whole folder bundles the "Download all" result into a single zip — unzip it and each SRT lands next to its video, matching the original folder structure.</p>
       <div id="fileInfo" class="meta hidden"></div>
       <div class="actions">
         <button id="startBtn" class="primary" disabled>Start</button>
