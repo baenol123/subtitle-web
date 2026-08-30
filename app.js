@@ -358,6 +358,7 @@ let running = false;
 let currentFileLabel = '';
 let allResults = [];
 let translatedNames = new Map();   // 원본 파일명 → 번역된 파일명 (run() 시작 시 한 번에 채운다)
+let translatedFolders = new Map(); // 원본 폴더 세그먼트 → 번역된 세그먼트 (폴더째 선택한 경우)
 
 // ─────────────────────────────────────────────────────────────
 // UI 헬퍼
@@ -1556,6 +1557,54 @@ async function translateFileNames(baseNames) {
   return out;
 }
 
+/**
+ * 폴더째 선택한 경우, 하위 폴더 이름도 파일명과 같은 방식으로 번역한다.
+ * 경로 전체가 아니라 폴더 구간(세그먼트) 단위로 중복 제거해 보내므로,
+ * 같은 폴더명은 어느 깊이에 있든 항상 같은 번역을 받는다.
+ * 반환: Map(원본 세그먼트 → 번역된 세그먼트). 실패한 세그먼트는 Map에 없다(원본 유지).
+ */
+async function translateFolderNames(relDirs) {
+  const out = new Map();
+  const segments = [];
+  for (const dir of relDirs) {
+    for (const seg of dir.split('/')) {
+      if (seg && !segments.includes(seg)) segments.push(seg);
+    }
+  }
+  if (segments.length === 0) return out;
+
+  const items = segments.map((text, id) => ({ id, text }));
+  const corrections = parseCorrections();
+  let results;
+  try {
+    splitBudget = SPLIT_BUDGET;
+    results = await translateBatchWithSplit(items, {
+      fileName: true,
+      sourceLabel: languageLabel(els.sourceLang.value),
+      targetLabel: languageLabel(els.targetLang.value),
+      styleGuide: els.styleGuide.value.trim() || undefined,
+      glossary: parseGlossary(els.glossary.value),
+    });
+  } catch (err) {
+    if (cancelled || isFatalApiError(err)) throw err;
+    console.warn('폴더명 번역 실패:', err);
+    return out;
+  }
+
+  for (const r of results) {
+    if (r.translation === undefined) continue;
+    const translated = cleanNamePart(applyCorrections(r.translation, corrections)).trim().slice(0, MAX_FILE_NAME).trim();
+    if (translated) out.set(segments[r.id], translated);
+  }
+  return out;
+}
+
+// 폴더 경로를 세그먼트 단위로 번역된 이름으로 치환한다 (번역이 없는 세그먼트는 원본 유지)
+function translateRelDir(relDir, folderMap) {
+  if (!relDir) return relDir;
+  return relDir.split('/').map((seg) => folderMap.get(seg) || seg).join('/');
+}
+
 // ─────────────────────────────────────────────────────────────
 // 결과 표시/다운로드
 // ─────────────────────────────────────────────────────────────
@@ -1856,7 +1905,7 @@ async function processOne(file) {
     fileName: file.name,
     baseName,
     translatedName: baseName,
-    relDir: relDirOf(file), // 폴더째 선택한 경우의 하위 경로 — zip 다운로드 시 구조 보존에 쓰인다
+    relDir: translateRelDir(relDirOf(file), translatedFolders), // 폴더째 선택한 경우의 하위 경로(번역됨) — zip 다운로드 시 구조 보존에 쓰인다
     originalSrt: '',
     translatedSrt: '',
     blockCount: 0,
@@ -1988,6 +2037,7 @@ async function run() {
 
   let fatalMessage = '';
   translatedNames = new Map();
+  translatedFolders = new Map();
 
   try {
     // 파일명은 전부 모아 한 번에 번역한다.
@@ -1997,6 +2047,10 @@ async function run() {
       setStatus(T.translatingFilename);
       const baseNames = selectedFiles.map((f) => f.name.replace(/\.[^.]+$/, ''));
       translatedNames = await translateFileNames(baseNames);
+
+      // 폴더째 선택한 경우 하위 폴더 이름도 같이 번역한다 (zip 구조 보존 다운로드에 반영)
+      const relDirs = [...new Set(selectedFiles.map((f) => relDirOf(f)).filter(Boolean))];
+      if (relDirs.length > 0) translatedFolders = await translateFolderNames(relDirs);
     }
 
     for (const [i, file] of selectedFiles.entries()) {
