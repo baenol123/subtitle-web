@@ -1475,17 +1475,23 @@ function buildFileNamePrompt(items, opts) {
 }
 
 /**
- * 선택된 파일 이름들을 한 번에 번역한다.
+ * 선택된 파일 이름과 (폴더째 선택한 경우) 하위 폴더 이름을 단 한 번의 요청으로 함께 번역한다.
+ * 둘을 따로 요청하면 Gemini 무료 티어의 하루 요청 횟수 한도만 그만큼 더 빨리 소진되므로,
+ * 파일 제목·말머리·폴더 세그먼트를 전부 하나의 배치에 담아 보낸다.
  *  - 회차 번호·트랙 표기는 모델에 보내지 않고 그대로 붙이고, 효과음 표기는 떼어내 버린다
  *    (단, 그 탓에 이름이 겹치면 겹치는 것들만 표기를 되살린다)
  *  - 마스킹 후 제목이 같으면 한 번만 번역해 재사용한다 → "4-1 방과후"와 "4-2 방과후"는 항상 같은 번역
- *  - 전체를 한 요청에 담아 모델이 다른 제목까지 참고해 용어를 맞추게 한다
- * 반환: Map(원본 baseName → 번역된 이름). 실패한 항목은 Map에 없다.
+ *  - 폴더 세그먼트도 경로 전체가 아니라 구간 단위로 중복 제거하므로, 같은 폴더명은
+ *    어느 깊이에 있든 항상 같은 번역을 받는다
+ * 반환: { files: Map(원본 baseName → 번역된 이름), folders: Map(원본 세그먼트 → 번역된 세그먼트) }.
+ * 실패한 항목은 각 Map에 없다(원본 유지).
  */
-async function translateFileNames(baseNames) {
-  const out = new Map();
+async function translateNamesAndFolders(baseNames, relDirs) {
+  const files = new Map();
+  const folders = new Map();
+
   const parts = new Map();                     // baseName → { prefix, body, suffix }
-  const titles = [];                           // 중복 제거된 제목(body)
+  const titles = [];                           // 중복 제거된 파일 제목(body)
   for (const name of baseNames) {
     const p = splitNameAffixes(name);
     Object.assign(p, maskSymbols(p.body));     // p.masked / p.marks
@@ -1493,9 +1499,21 @@ async function translateFileNames(baseNames) {
     for (const t of p.tags) if (t.text && !titles.includes(t.text)) titles.push(t.text);
     if (!titles.includes(p.masked)) titles.push(p.masked);
   }
-  if (titles.length === 0) return out;
 
-  const items = titles.map((text, id) => ({ id, text }));
+  const segments = [];                          // 중복 제거된 폴더 세그먼트
+  for (const dir of relDirs) {
+    for (const seg of dir.split('/')) {
+      if (seg && !segments.includes(seg)) segments.push(seg);
+    }
+  }
+
+  if (titles.length === 0 && segments.length === 0) return { files, folders };
+
+  // 폴더 세그먼트는 파일 제목 뒤에 이어붙여 같은 요청으로 보낸다 (id 오프셋만 구분)
+  const items = [
+    ...titles.map((text, id) => ({ id, text })),
+    ...segments.map((text, i) => ({ id: titles.length + i, text })),
+  ];
   const corrections = parseCorrections();
   let results;
   try {
@@ -1509,17 +1527,21 @@ async function translateFileNames(baseNames) {
     });
   } catch (err) {
     if (cancelled || isFatalApiError(err)) throw err;
-    console.warn('파일명 번역 실패:', err);
-    return out;
+    console.warn('파일명/폴더명 번역 실패:', err);
+    return { files, folders };
   }
+
+  const byId = new Map();
+  for (const r of results) if (r.translation !== undefined) byId.set(r.id, r.translation);
 
   // 자리표시자가 박힌 채로 보관한다. 되돌리기는 파일별로 자기 marks 를 써야 한다.
   const byTitle = new Map();
-  for (const r of results) {
-    if (r.translation === undefined) continue;
-    const translated = cleanNamePart(applyCorrections(r.translation, corrections)).trim();
-    if (translated) byTitle.set(titles[r.id], translated);
-  }
+  titles.forEach((title, id) => {
+    const raw = byId.get(id);
+    if (raw === undefined) return;
+    const translated = cleanNamePart(applyCorrections(raw, corrections)).trim();
+    if (translated) byTitle.set(title, translated);
+  });
 
   // 떼어낸 꼬리(_SEless 등)는 결과 이름에 다시 붙이지 않는다.
   const proposed = new Map();                  // baseName → { prefix, translated, suffix, full }
@@ -1552,51 +1574,17 @@ async function translateFileNames(baseNames) {
   }
 
   for (const [name, { full }] of proposed) {
-    if (full && full !== name) out.set(name, full);
-  }
-  return out;
-}
-
-/**
- * 폴더째 선택한 경우, 하위 폴더 이름도 파일명과 같은 방식으로 번역한다.
- * 경로 전체가 아니라 폴더 구간(세그먼트) 단위로 중복 제거해 보내므로,
- * 같은 폴더명은 어느 깊이에 있든 항상 같은 번역을 받는다.
- * 반환: Map(원본 세그먼트 → 번역된 세그먼트). 실패한 세그먼트는 Map에 없다(원본 유지).
- */
-async function translateFolderNames(relDirs) {
-  const out = new Map();
-  const segments = [];
-  for (const dir of relDirs) {
-    for (const seg of dir.split('/')) {
-      if (seg && !segments.includes(seg)) segments.push(seg);
-    }
-  }
-  if (segments.length === 0) return out;
-
-  const items = segments.map((text, id) => ({ id, text }));
-  const corrections = parseCorrections();
-  let results;
-  try {
-    splitBudget = SPLIT_BUDGET;
-    results = await translateBatchWithSplit(items, {
-      fileName: true,
-      sourceLabel: languageLabel(els.sourceLang.value),
-      targetLabel: languageLabel(els.targetLang.value),
-      styleGuide: els.styleGuide.value.trim() || undefined,
-      glossary: parseGlossary(els.glossary.value),
-    });
-  } catch (err) {
-    if (cancelled || isFatalApiError(err)) throw err;
-    console.warn('폴더명 번역 실패:', err);
-    return out;
+    if (full && full !== name) files.set(name, full);
   }
 
-  for (const r of results) {
-    if (r.translation === undefined) continue;
-    const translated = cleanNamePart(applyCorrections(r.translation, corrections)).trim().slice(0, MAX_FILE_NAME).trim();
-    if (translated) out.set(segments[r.id], translated);
-  }
-  return out;
+  segments.forEach((seg, i) => {
+    const raw = byId.get(titles.length + i);
+    if (raw === undefined) return;
+    const translated = cleanNamePart(applyCorrections(raw, corrections)).trim().slice(0, MAX_FILE_NAME).trim();
+    if (translated) folders.set(seg, translated);
+  });
+
+  return { files, folders };
 }
 
 // 폴더 경로를 세그먼트 단위로 번역된 이름으로 치환한다 (번역이 없는 세그먼트는 원본 유지)
@@ -2046,11 +2034,9 @@ async function run() {
     if (!skipTranslate && els.renameKorean.checked) {
       setStatus(T.translatingFilename);
       const baseNames = selectedFiles.map((f) => f.name.replace(/\.[^.]+$/, ''));
-      translatedNames = await translateFileNames(baseNames);
-
-      // 폴더째 선택한 경우 하위 폴더 이름도 같이 번역한다 (zip 구조 보존 다운로드에 반영)
       const relDirs = [...new Set(selectedFiles.map((f) => relDirOf(f)).filter(Boolean))];
-      if (relDirs.length > 0) translatedFolders = await translateFolderNames(relDirs);
+      // 파일명 + 폴더명을 한 요청으로 합쳐 보낸다 (요청 횟수를 늘리지 않기 위해)
+      ({ files: translatedNames, folders: translatedFolders } = await translateNamesAndFolders(baseNames, relDirs));
     }
 
     for (const [i, file] of selectedFiles.entries()) {
