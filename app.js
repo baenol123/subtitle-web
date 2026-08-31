@@ -81,9 +81,12 @@ const STRINGS = {
     needAnthropicKey: '번역에는 Anthropic API 키가 필요합니다.',
     nothingToDo: 'SRT 파일 + "추출만" 조합은 할 일이 없습니다.',
     folderNoMedia: '선택한 폴더에서 지원되는 영상/오디오/자막 파일을 찾지 못했습니다.',
-    saveToFolderDone: (ok, fail) => fail > 0
-      ? `자막 ${ok}개를 폴더에 저장했습니다 (${fail}개는 원본을 찾지 못해 건너뜀 — 처음 선택한 것과 같은 폴더인지 확인해주세요).`
-      : `자막 ${ok}개를 원본 옆에 저장했습니다. 바로 재생해보세요.`,
+    saveToFolderDone: (ok, fail, folders) => {
+      const base = fail > 0
+        ? `자막 ${ok}개를 폴더에 저장했습니다 (${fail}개는 원본을 찾지 못해 건너뜀 — 처음 선택한 것과 같은 폴더인지 확인해주세요).`
+        : `자막 ${ok}개를 원본 옆에 저장했습니다. 바로 재생해보세요.`;
+      return folders > 0 ? `${base} 폴더 이름 ${folders}개도 번역된 이름으로 바꿨습니다.` : base;
+    },
     saveToFolderNone: '저장할 자막이 없습니다.',
     saveToFolderError: (msg) => `폴더 저장 실패: ${msg}`,
     noSubtitles: '추출된 자막이 없습니다. 음성이 있는 파일인지 확인해주세요.',
@@ -154,9 +157,12 @@ const STRINGS = {
     needAnthropicKey: 'An Anthropic API key is required for translation.',
     nothingToDo: 'SRT file + "extract only" leaves nothing to do.',
     folderNoMedia: 'No supported video/audio/subtitle files were found in the selected folder.',
-    saveToFolderDone: (ok, fail) => fail > 0
-      ? `Saved ${ok} subtitle(s) to the folder (${fail} skipped — the original wasn't found; make sure you picked the same folder you started from).`
-      : `Saved ${ok} subtitle(s) right next to their videos. Try playing one now.`,
+    saveToFolderDone: (ok, fail, folders) => {
+      const base = fail > 0
+        ? `Saved ${ok} subtitle(s) to the folder (${fail} skipped — the original wasn't found; make sure you picked the same folder you started from).`
+        : `Saved ${ok} subtitle(s) right next to their videos. Try playing one now.`;
+      return folders > 0 ? `${base} Also renamed ${folders} folder(s) to the translated title.` : base;
+    },
     saveToFolderNone: 'No subtitles to save.',
     saveToFolderError: (msg) => `Couldn't save to folder: ${msg}`,
     noSubtitles: 'No subtitles were extracted. Please check that the file contains speech.',
@@ -1894,16 +1900,47 @@ els.downloadAllBtn.addEventListener('click', async () => {
   }
 });
 
-// 폴더 안 서브 핸들을 경로 세그먼트를 따라 내려간다 (원본이 있던 폴더이므로 이미 존재해야 함)
-async function getDirHandleAtPath(rootHandle, relDir) {
+// 폴더 안 서브 핸들을 경로 세그먼트를 따라 내려간다 (원본이 있던 폴더이므로 이미 존재해야 함).
+// dirCache에 지나온 폴더 핸들을 { handle, segName } 형태로 쌓아두면, 처리가 끝난 뒤
+// 그 핸들들로 바로 폴더 이름도 바꿀 수 있다(다시 이름으로 찾을 필요 없이 핸들 참조로 바로 바꾸므로
+// 어떤 폴더를 먼저 바꾸든 다른 폴더 탐색에 영향을 주지 않는다).
+async function getDirHandleAtPath(rootHandle, relDir, dirCache) {
   let segments = relDir ? relDir.split('/') : [];
   // <input webkitdirectory>로 받은 경로는 항상 맨 위 폴더 이름 자체를 첫 구간으로 포함한다.
   // "폴더에 저장"에서는 보통 그 폴더 자체를 다시 골라 쓰기 권한을 주므로, 루트 핸들 이름과
   // 첫 구간이 같으면 중복 탐색(내폴더/내폴더/...)이 되지 않게 건너뛴다.
   if (segments.length > 0 && segments[0] === rootHandle.name) segments = segments.slice(1);
   let dir = rootHandle;
-  for (const seg of segments) dir = await dir.getDirectoryHandle(seg);
+  let path = '';
+  for (const seg of segments) {
+    path = path ? `${path}/${seg}` : seg;
+    if (dirCache && dirCache.has(path)) {
+      dir = dirCache.get(path).handle;
+    } else {
+      dir = await dir.getDirectoryHandle(seg);
+      if (dirCache) dirCache.set(path, { handle: dir, segName: seg });
+    }
+  }
   return dir;
+}
+
+// 지나온 폴더들(과 최상위 폴더 자신)을 번역된 이름으로 바꾼다. move()가 없는 브라우저나
+// 번역이 없는 세그먼트는 조용히 건너뛴다. 반환값은 실제로 이름이 바뀐 폴더 개수.
+async function renameTranslatedFolders(rootHandle, dirCache, folderMap) {
+  let renamed = 0;
+  if (typeof rootHandle.move === 'function' && folderMap.has(rootHandle.name)) {
+    const translated = folderMap.get(rootHandle.name);
+    if (translated && translated !== rootHandle.name) {
+      try { await rootHandle.move(translated); renamed++; } catch (err) { console.warn('최상위 폴더 이름 변경 실패:', err); }
+    }
+  }
+  for (const { handle, segName } of dirCache.values()) {
+    if (typeof handle.move !== 'function') continue;
+    const translated = folderMap.get(segName);
+    if (!translated || translated === segName) continue;
+    try { await handle.move(translated); renamed++; } catch (err) { console.warn('폴더 이름 변경 실패:', segName, err); }
+  }
+  return renamed;
 }
 
 // 파일명이 실제로 번역됐으면 원본 영상도 그 자리에서 같은 이름으로 바꾼다 (복사 없이 즉시 —
@@ -1945,11 +1982,12 @@ if (els.saveToFolderBtn) {
         return;
       }
 
+      const dirCache = new Map();
       let ok = 0;
       let fail = 0;
       for (const r of targets) {
         try {
-          const dir = await getDirHandleAtPath(rootHandle, r.origRelDir);
+          const dir = await getDirHandleAtPath(rootHandle, r.origRelDir, dirCache);
           const srtBaseName = await renameOriginalIfPossible(dir, r);
           const fileHandle = await dir.getFileHandle(`${srtBaseName}.srt`, { create: true });
           const writable = await fileHandle.createWritable();
@@ -1961,7 +1999,10 @@ if (els.saveToFolderBtn) {
           fail++;
         }
       }
-      setStatus(T.saveToFolderDone(ok, fail));
+      // 파일 저장이 다 끝난 뒤에 폴더 이름을 바꾼다 — 파일 탐색 중에 이름이 바뀌면
+      // 아직 처리 안 한 다른 파일이 원래 이름으로 그 폴더를 못 찾게 되기 때문이다.
+      const foldersRenamed = await renameTranslatedFolders(rootHandle, dirCache, translatedFolders);
+      setStatus(T.saveToFolderDone(ok, fail, foldersRenamed));
     });
   }
 }
