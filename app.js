@@ -1634,19 +1634,21 @@ function buildRenameBat(pairs) {
     'cd /d "%~dp0"',
     'set missing=0',
     'echo 자막공장 - 원본 파일 이름 바꾸기',
-    'echo 폴더: %CD%',
+    'echo 폴더: %CD% (폴더째 선택했다면 하위 폴더 구조까지 그대로 유지된 상태여야 합니다)',
     'echo.',
   ];
   let skipped = 0;
-  for (const { from, to, key } of pairs) {
+  for (const { from, to, dir, key } of pairs) {
     if (from === to) continue;
-    // 이름에 cmd 특수문자가 있으면 안전하게 건너뛰고 사람이 직접 처리하게 남긴다
+    // 이름에 cmd 특수문자가 있으면 안전하게 건너뛰고 사람이 직접 처리하게 남긴다 (경로 포함)
     if (BAT_UNSAFE.test(from) || BAT_UNSAFE.test(to)) {
       lines.push(`echo [건너뜀] "${from.replace(/[%^"]/g, '?')}"`);
       skipped++;
       continue;
     }
-    lines.push(`call :try "${from}" "${to}" "${matchPattern(from, key)}"`);
+    // ren의 대상 이름(%~2)은 경로를 가질 수 없어 파일명만 담고, 어느 폴더인지는 %~4로 따로 넘긴다.
+    const pattern = matchPattern(from, key);
+    lines.push(`call :try "${from}" "${to}" "${pattern ? dir + pattern : ''}" "${dir}"`);
   }
   if (skipped > 0) {
     lines.push('echo.');
@@ -1656,24 +1658,25 @@ function buildRenameBat(pairs) {
   lines.push(
     'echo.',
     'if %missing% GEQ 1 (',
-    '  echo 원본 파일 %missing%개를 이 폴더에서 찾지 못했습니다.',
-    '  echo 이 .bat 을 음성 파일이 있는 폴더로 옮긴 뒤 다시 실행하세요.',
+    '  echo 원본 파일 %missing%개를 찾지 못했습니다.',
+    '  echo 이 .bat 을 폴더째 선택했을 때의 최상위 폴더로 옮기고(하위 폴더 구조는 그대로 유지) 다시 실행하세요.',
     '  echo.',
     ')',
     'echo 끝났습니다.',
     'pause',
     'exit /b',
     '',
-    // %1 원본 이름  %2 바꿀 이름  %3 대체 탐색 패턴(없으면 빈 문자열)
+    // %1 원본 이름(경로 포함)  %2 바꿀 이름(파일명만)  %3 대체 탐색 패턴(경로 포함, 없으면 빈 문자열)  %4 원본이 있는 폴더(경로, 없으면 빈 문자열)
     // 이름은 반드시 따옴표로 감싸 출력한다. 감싸지 않으면 & 가 든 이름에서 줄이 잘린다.
     // `if defined` 는 지연확장 없이도 런타임에 평가되므로 for 안에서 후보 수를 셀 수 있다.
+    // ren의 대상은 경로 없이 파일명만 허용되므로(같은 폴더 안에서만 이름을 바꿈), 존재 확인은 %~4%~2로 한다.
     ':try',
-    'if exist "%~2" (',
-    '  echo [이미 있음] "%~2"',
+    'if exist "%~4%~2" (',
+    '  echo [이미 있음] "%~4%~2"',
     '  goto :eof',
     ')',
     'if exist "%~1" (',
-    '  ren "%~1" "%~2" && echo [완료] "%~2" || echo [실패] "%~1"',
+    '  ren "%~1" "%~2" && echo [완료] "%~4%~2" || echo [실패] "%~1"',
     '  goto :eof',
     ')',
     'if "%~3"=="" goto :notfound',
@@ -1685,7 +1688,7 @@ function buildRenameBat(pairs) {
     '  echo [모호함] "%~3" 에 해당하는 파일이 여러 개라 건너뜁니다',
     '  goto :eof',
     ')',
-    'ren "%cand%" "%~2" && echo [유사일치] "%~2"   [원본 "%cand%"] || echo [실패] "%cand%"',
+    'ren "%cand%" "%~2" && echo [유사일치] "%~4%~2"   [원본 "%cand%"] || echo [실패] "%cand%"',
     'goto :eof',
     '',
     ':notfound',
@@ -1894,6 +1897,7 @@ async function processOne(file) {
     baseName,
     translatedName: baseName,
     relDir: translateRelDir(relDirOf(file), translatedFolders), // 폴더째 선택한 경우의 하위 경로(번역됨) — zip 다운로드 시 구조 보존에 쓰인다
+    origRelDir: relDirOf(file), // 번역 전 원래 경로 — 원본 미디어는 실제로 이 폴더에 있으므로 이름바꾸기.bat 이 여기를 찾아야 한다
     originalSrt: '',
     translatedSrt: '',
     blockCount: 0,
@@ -2077,14 +2081,20 @@ async function run() {
     els.resultStats.textContent = T.batchDone(okResults.length, selectedFiles.length);
     els.downloadAllBtn.classList.toggle('hidden', okResults.length < 2);
 
-    // 이름이 실제로 바뀐 파일이 있으면 원본 미디어까지 한 번에 바꿔주는 .bat 을 제공한다
+    // 이름이 실제로 바뀐 파일이 있으면 원본 미디어까지 한 번에 바꿔주는 .bat 을 제공한다.
+    // 원본 미디어는 실제로 origRelDir(번역 전 경로)에 있으므로 그 경로로 찾아야 한다 —
+    // 폴더 자체는 번역하지 않고 그 안의 파일 이름만 바꾼다 (ren은 같은 폴더 안에서만 이름을 바꿀 수 있다).
     const renamePairs = allResults
       .filter((r) => !r.error && r.translatedName && r.translatedName !== r.baseName)
-      .map((r) => ({
-        from: r.fileName,
-        to: r.translatedName + fileExt(r.fileName),
-        key: splitNameAffixes(r.baseName).prefix,   // "01.♥TR0_" — 다른 판을 찾을 때 쓰는 키
-      }));
+      .map((r) => {
+        const dir = r.origRelDir ? `${r.origRelDir.replace(/\//g, '\\')}\\` : '';
+        return {
+          from: dir + r.fileName,
+          to: r.translatedName + fileExt(r.fileName),
+          dir,
+          key: splitNameAffixes(r.baseName).prefix,   // "01.♥TR0_" — 다른 판을 찾을 때 쓰는 키
+        };
+      });
     if (els.renameBatBtn) {
       els.renameBatBtn.classList.toggle('hidden', renamePairs.length === 0);
       els.renameBatBtn.onclick = () =>
