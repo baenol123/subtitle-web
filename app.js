@@ -1896,10 +1896,13 @@ els.downloadAllBtn.addEventListener('click', async () => {
 
 // 폴더 안 서브 핸들을 경로 세그먼트를 따라 내려간다 (원본이 있던 폴더이므로 이미 존재해야 함)
 async function getDirHandleAtPath(rootHandle, relDir) {
+  let segments = relDir ? relDir.split('/') : [];
+  // <input webkitdirectory>로 받은 경로는 항상 맨 위 폴더 이름 자체를 첫 구간으로 포함한다.
+  // "폴더에 저장"에서는 보통 그 폴더 자체를 다시 골라 쓰기 권한을 주므로, 루트 핸들 이름과
+  // 첫 구간이 같으면 중복 탐색(내폴더/내폴더/...)이 되지 않게 건너뛴다.
+  if (segments.length > 0 && segments[0] === rootHandle.name) segments = segments.slice(1);
   let dir = rootHandle;
-  if (relDir) {
-    for (const seg of relDir.split('/')) dir = await dir.getDirectoryHandle(seg);
-  }
+  for (const seg of segments) dir = await dir.getDirectoryHandle(seg);
   return dir;
 }
 
