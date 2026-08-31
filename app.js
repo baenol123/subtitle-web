@@ -13,6 +13,10 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 // 상수
 // ─────────────────────────────────────────────────────────────
 
+// 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
+// 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
+const APP_VERSION = '2026-08-31.1';
+
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const GROQ_MODEL = 'whisper-large-v3-turbo';
@@ -301,7 +305,10 @@ const els = {
   resultPanel: $('resultPanel'), resultStats: $('resultStats'),
   resultsList: $('resultsList'), downloadAllBtn: $('downloadAllBtn'),
   renameBatBtn: $('renameBatBtn'), saveToFolderBtn: $('saveToFolderBtn'),
+  appVersion: $('appVersion'),
 };
+
+if (els.appVersion) els.appVersion.textContent = APP_VERSION;
 
 // 언어 드롭다운 채우기 — 페이지 언어에 맞는 이름으로, 주요/전체 그룹 분리
 function populateLanguageSelects() {
