@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-08-31.2';
+const APP_VERSION = '2026-08-31.3';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -1986,11 +1986,17 @@ async function renameOriginalIfPossible(dir, result) {
 
   try {
     const videoHandle = await dir.getFileHandle(result.fileName);
-    if (typeof videoHandle.move !== 'function') return result.baseName;
+    if (typeof videoHandle.move !== 'function') {
+      // Chrome은 OPFS 밖의 로컬 파일에 대해서는 아직 move()를 플래그 뒤에 숨겨둔 상태라
+      // 일반 사용자 환경에서는 이 경로를 타는 게 정상이다 — 원본 이름으로 자막만 저장한다.
+      console.log(`[원본 파일 이름 변경] 건너뜀 — 이 브라우저는 로컬 파일의 move()를 지원하지 않습니다: "${result.fileName}"`);
+      return result.baseName;
+    }
     await videoHandle.move(result.translatedName + fileExt(result.fileName));
+    console.log(`[원본 파일 이름 변경] 완료 — "${result.fileName}" → "${result.translatedName}${fileExt(result.fileName)}"`);
     return result.translatedName;
   } catch (err) {
-    console.warn('원본 파일 이름 변경 실패, 원본 이름으로 자막만 저장합니다:', result.fileName, err);
+    console.warn(`[원본 파일 이름 변경] 실패 — "${result.fileName}"`, err);
     return result.baseName;
   }
 }
