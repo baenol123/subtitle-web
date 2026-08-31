@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-08-31.4';
+const APP_VERSION = '2026-08-31.5';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -1625,106 +1625,122 @@ function translateRelDir(relDir, folderMap) {
 // 브라우저에서 사용자의 실제 파일 이름을 직접 바꾸려면 File System Access API가 필요한데,
 // 로컬 파일에 대한 FileSystemFileHandle.move()는 아직 플래그 뒤에 있고,
 // 복사 후 삭제로 흉내내면 수 GB짜리 영상을 통째로 다시 써야 한다.
-// 그래서 이름만 바꾸는 배치 파일을 대신 내려준다 — 복사가 없고 즉시 끝난다.
+// 그래서 이름만 바꾸는 스크립트를 대신 내려준다 — 복사가 없고 즉시 끝난다.
 //
-// 인코딩: 원본이 일본어, 결과가 한국어라 어떤 단일 ANSI 코드페이지로도 둘 다 담을 수 없다.
-// UTF-8(BOM 없음) + `chcp 65001` 조합으로 실제 동작을 확인했다. BOM이 있으면 첫 줄이 깨진다.
+// ⚠ 순수 cmd 배치로 직접 구현했다가 실사용에서 재현 확인한 치명적 버그로 폐기했다:
+// cmd.exe가 UTF-8 코드페이지(chcp 65001)에서 배치 파일을 실행할 때, 한글/일본어처럼
+// 여러 바이트로 된 글자가 든 줄을 처리하고 나면 다음 줄을 읽는 위치 계산이 어긋나서
+// 스크립트가 중간에 깨진다(번역된 문구 조각이 "명령어로 인식 안 됨" 에러로 튀어나옴).
+// 문자 하나하나를 막는 걸로는 못 고치는, cmd 배치 파서 자체의 오래된 결함이라 —
+// .bat은 순수 ASCII 텍스트로 된 아주 짧은 실행기 역할만 하고, 실제 이름 변경 로직은
+// PowerShell(-EncodedCommand, UTF-16LE 기반 Base64라 인코딩 문제 자체가 없다)에 맡긴다.
+// PowerShell 문자열은 작은따옴표(') 하나만 조심하면(''로 두 번 써서 이스케이프) 되므로
+// cmd 특수문자를 하나하나 걸러내던 예전 로직(BAT_UNSAFE)도 통째로 필요 없어졌다.
 
-// 파일명에 들어갈 수 있으면서 cmd에서 특수한 의미를 갖는 문자는 % ! ^ & 넷뿐이다.
-// (< > | " * ? : / \ 는 NTFS가 파일명으로 허용하지 않고, 번역 결과에서도 cleanNamePart 가 지운다.)
-//
-// 실측 결과:
-//   & ! → 따옴표 안에서 안전. echo 도 "%~1" 처럼 감싸면 그대로 출력된다.
-//   ^   → call 이 인자를 한 번 더 파싱하면서 캐럿이 이중화된다(car^y → car^^y). 못 쓴다.
-//   %   → 어느 위치에서도 변수 확장으로 먹힌다. 못 쓴다.
-const BAT_UNSAFE = /[%^"]/;
+function psQuote(str) {
+  return `'${String(str).replace(/'/g, "''")}'`;
+}
 
-// 정확한 이름이 없을 때 쓸 대체 탐색 패턴. "01.♥TR0_" 처럼 회차·트랙 표기가 있을 때만 만든다.
-// SE 있는 판과 없는 판은 파일명이 _SEless 하나만 다른 게 아니라 -1 이 빠지거나 언더바가
-// 사라지기도 해서 단순 치환으로는 못 맞춘다. 트랙 표기는 두 판에서 항상 같으므로 이걸 키로 쓴다.
+// PowerShell -EncodedCommand 는 UTF-16LE로 인코딩한 뒤 Base64로 감싼 문자열을 요구한다.
+// JS 문자열은 내부적으로 이미 UTF-16(코드유닛 단위)이라 charCodeAt을 그대로 바이트로 풀면 된다.
+function toBase64Utf16LE(str) {
+  const bytes = new Uint8Array(str.length * 2);
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    bytes[i * 2] = code & 0xff;
+    bytes[i * 2 + 1] = (code >> 8) & 0xff;
+  }
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+// 정확한 이름이 없을 때 쓸 대체 탐색 패턴(PowerShell -Filter 와일드카드). "01.♥TR0_" 처럼
+// 회차·트랙 표기가 있을 때만 만든다. SE 있는 판과 없는 판은 파일명이 _SEless 하나만 다른 게
+// 아니라 -1 이 빠지거나 언더바가 사라지기도 해서 단순 치환으로는 못 맞춘다.
+// 트랙 표기는 두 판에서 항상 같으므로 이걸 키로 쓴다.
 function matchPattern(from, key) {
   if (!key || !/\d/.test(key)) return '';               // 숫자가 없으면 키로 못 쓴다
-  if (/[*?]/.test(key) || BAT_UNSAFE.test(key)) return '';
+  if (/[*?]/.test(key)) return '';                       // 키 자체에 와일드카드 문자가 있으면 패턴이 애매해진다
   const ext = from.match(/\.[^.]+$/)?.[0] ?? '';
   return key + '*' + ext;
 }
 
-function buildRenameBat(pairs) {
-  const lines = [
-    '@echo off',
-    'chcp 65001 >nul',
-    'setlocal',
-    'cd /d "%~dp0"',
-    'set missing=0',
-    'echo 자막공장 - 원본 파일 이름 바꾸기',
-    'echo 폴더: %CD% (폴더째 선택했다면 하위 폴더 구조까지 그대로 유지된 상태여야 합니다)',
-    'echo.',
-  ];
-  let skipped = 0;
-  for (const { from, to, dir, key } of pairs) {
-    if (from === to) continue;
-    // 이름에 cmd 특수문자가 있으면 안전하게 건너뛰고 사람이 직접 처리하게 남긴다 (경로 포함)
-    if (BAT_UNSAFE.test(from) || BAT_UNSAFE.test(to)) {
-      lines.push(`echo [건너뜀] "${from.replace(/[%^"]/g, '?')}"`);
-      skipped++;
-      continue;
-    }
-    // ren의 대상 이름(%~2)은 경로를 가질 수 없어 파일명만 담고, 어느 폴더인지는 %~4로 따로 넘긴다.
-    const pattern = matchPattern(from, key);
-    lines.push(`call :try "${from}" "${to}" "${pattern ? dir + pattern : ''}" "${dir}"`);
-  }
-  if (skipped > 0) {
-    lines.push('echo.');
-    lines.push(`echo 특수문자가 들어간 ${skipped}개는 건너뛰었습니다. 직접 바꿔주세요.`);
-  }
-  // 원본을 하나도 못 찾았다는 건 거의 항상 .bat 이 다운로드 폴더에 그대로 있다는 뜻이다.
-  lines.push(
-    'echo.',
-    'if %missing% GEQ 1 (',
-    '  echo 원본 파일 %missing%개를 찾지 못했습니다.',
-    '  echo 이 .bat 을 폴더째 선택했을 때의 최상위 폴더로 옮기고(하위 폴더 구조는 그대로 유지) 다시 실행하세요.',
-    '  echo.',
+function buildRenamePowerShell(pairs) {
+  const entries = pairs
+    .filter(({ from, to }) => from !== to)
+    .map(({ from, to, dir, key }) => {
+      const pattern = matchPattern(from, key);
+      return `  [pscustomobject]@{ From=${psQuote(from)}; To=${psQuote(to)}; Dir=${psQuote(dir)}; Pattern=${psQuote(pattern)} }`;
+    });
+
+  return [
+    '$OutputEncoding = [System.Text.Encoding]::UTF8',
+    'try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}',
+    "Write-Host '자막공장 - 원본 파일 이름 바꾸기'",
+    // -EncodedCommand로 실행하면 $PSScriptRoot가 비어있어 여기서 위치를 잡을 수 없다.
+    // 대신 .bat 쪽에서 cd /d "%~dp0" 로 먼저 이동해두고(순수 ASCII라 안전) 그 작업 폴더를
+    // PowerShell 자식 프로세스가 그대로 물려받는다.
+    "Write-Host ('폴더: ' + $PWD.Path + ' (폴더째 선택했다면 하위 폴더 구조까지 그대로 유지된 상태여야 합니다)')",
+    "Write-Host ''",
+    '$missing = 0',
+    '$pairs = @(',
+    entries.join(",\r\n"),
     ')',
-    'echo 끝났습니다.',
-    'pause',
-    'exit /b',
+    'foreach ($p in $pairs) {',
+    '  $destPath = if ($p.Dir) { Join-Path $p.Dir $p.To } else { $p.To }',
+    '  if (Test-Path -LiteralPath $destPath) {',
+    "    Write-Host ('[이미 있음] ' + $destPath)",
+    '    continue',
+    '  }',
+    '  if (Test-Path -LiteralPath $p.From) {',
+    '    try {',
+    '      Rename-Item -LiteralPath $p.From -NewName $p.To -ErrorAction Stop',
+    "      Write-Host ('[완료] ' + $destPath)",
+    '    } catch {',
+    "      Write-Host ('[실패] ' + $p.From)",
+    '    }',
+    '    continue',
+    '  }',
+    '  if ($p.Pattern) {',
+    "    $searchDir = if ($p.Dir) { $p.Dir } else { '.' }",
+    '    $candidates = @(Get-ChildItem -LiteralPath $searchDir -Filter $p.Pattern -File -ErrorAction SilentlyContinue)',
+    '    if ($candidates.Count -eq 1) {',
+    '      try {',
+    '        Rename-Item -LiteralPath $candidates[0].FullName -NewName $p.To -ErrorAction Stop',
+    "        Write-Host ('[유사일치] ' + $destPath + '   [원본 ' + $candidates[0].Name + ']')",
+    '      } catch {',
+    "        Write-Host ('[실패] ' + $candidates[0].FullName)",
+    '      }',
+    '      continue',
+    '    } elseif ($candidates.Count -gt 1) {',
+    "      Write-Host ('[모호함] ' + $p.Pattern + ' 에 해당하는 파일이 여러 개라 건너뜁니다')",
+    '      continue',
+    '    }',
+    '  }',
+    "  Write-Host ('[없음] ' + $p.From)",
+    '  $missing++',
+    '}',
+    'if ($missing -ge 1) {',
+    "  Write-Host ''",
+    "  Write-Host ('원본 파일 ' + $missing + '개를 찾지 못했습니다.')",
+    "  Write-Host '이 .bat 을 폴더째 선택했을 때의 최상위 폴더로 옮기고(하위 폴더 구조는 그대로 유지) 다시 실행하세요.'",
+    '}',
+    "Write-Host '끝났습니다.'",
+    "Read-Host '계속하려면 Enter를 누르세요'",
+  ].join('\r\n');
+}
+
+function buildRenameBat(pairs) {
+  const encoded = toBase64Utf16LE(buildRenamePowerShell(pairs));
+  return [
+    '@echo off',
+    // 순수 ASCII 메커니즘(%~dp0)만 쓰므로 cmd의 UTF-8 줄바꿈 버그와 무관하게 안전하다.
+    'cd /d "%~dp0"',
+    `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encoded}`,
+    'if errorlevel 1 pause',
     '',
-    // %1 원본 이름(경로 포함)  %2 바꿀 이름(파일명만)  %3 대체 탐색 패턴(경로 포함, 없으면 빈 문자열)  %4 원본이 있는 폴더(경로, 없으면 빈 문자열)
-    // 이름은 반드시 따옴표로 감싸 출력한다. 감싸지 않으면 & 가 든 이름에서 줄이 잘린다.
-    // 여러 줄짜리 if (...) 블록은 절대 쓰지 않는다 — 번역된 이름에 괄호가 섞여 들어오면
-    // (닫는 괄호 하나가 블록 파싱을 깨서 "X was unexpected at this time"으로 스크립트 전체가
-    // 죽는 사고가 실제로 났다) 블록이 없으면 어떤 문자가 와도 안전하므로 전부 goto 로 분기한다.
-    // ren의 대상은 경로 없이 파일명만 허용되므로(같은 폴더 안에서만 이름을 바꿈), 존재 확인은 %~4%~2로 한다.
-    ':try',
-    'if exist "%~4%~2" goto :already',
-    'if exist "%~1" goto :direct',
-    'if "%~3"=="" goto :notfound',
-    'set "cand="',
-    'set "dup="',
-    'for %%f in ("%~3") do if defined cand (set "dup=1") else (set "cand=%%f")',
-    'if not defined cand goto :notfound',
-    'if defined dup goto :ambiguous',
-    'ren "%cand%" "%~2" && echo [유사일치] "%~4%~2"   [원본 "%cand%"] || echo [실패] "%cand%"',
-    'goto :eof',
-    '',
-    ':already',
-    'echo [이미 있음] "%~4%~2"',
-    'goto :eof',
-    '',
-    ':direct',
-    'ren "%~1" "%~2" && echo [완료] "%~4%~2" || echo [실패] "%~1"',
-    'goto :eof',
-    '',
-    ':ambiguous',
-    'echo [모호함] "%~3" 에 해당하는 파일이 여러 개라 건너뜁니다',
-    'goto :eof',
-    '',
-    ':notfound',
-    'echo [없음] "%~1"',
-    'set /a missing+=1',
-    'goto :eof',
-  );
-  return lines.join('\r\n') + '\r\n';
+  ].join('\r\n');
 }
 
 function triggerDownload(blob, filename) {
