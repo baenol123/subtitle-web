@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-08-31.1';
+const APP_VERSION = '2026-08-31.2';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -1931,21 +1931,47 @@ async function getDirHandleAtPath(rootHandle, relDir, dirCache) {
   return dir;
 }
 
-// 지나온 폴더들(과 최상위 폴더 자신)을 번역된 이름으로 바꾼다. move()가 없는 브라우저나
-// 번역이 없는 세그먼트는 조용히 건너뛴다. 반환값은 실제로 이름이 바뀐 폴더 개수.
+// 지나온 폴더들(과 최상위 폴더 자신)을 번역된 이름으로 바꾼다. 반환값은 실제로 이름이 바뀐 폴더 개수.
+// 왜 건너뛰었는지 전부 console.log로 남긴다 — 조용히 넘어가면 실패인지 애초에
+// 해당 사항이 없는 건지 사용자가 콘솔로도 구분할 수 없기 때문이다.
 async function renameTranslatedFolders(rootHandle, dirCache, folderMap) {
   let renamed = 0;
-  if (typeof rootHandle.move === 'function' && folderMap.has(rootHandle.name)) {
-    const translated = folderMap.get(rootHandle.name);
-    if (translated && translated !== rootHandle.name) {
-      try { await rootHandle.move(translated); renamed++; } catch (err) { console.warn('최상위 폴더 이름 변경 실패:', err); }
+  const canMoveDir = typeof rootHandle.move === 'function';
+  console.log('[폴더 이름 변경]', canMoveDir ? '이 브라우저는 폴더 이름 변경(move)을 지원합니다.' : '이 브라우저는 폴더 이름 변경(move)을 지원하지 않습니다 — 폴더명은 그대로 둡니다.');
+
+  if (canMoveDir) {
+    if (!folderMap.has(rootHandle.name)) {
+      console.log(`[폴더 이름 변경] 건너뜀 — 최상위 폴더 "${rootHandle.name}"에 대한 번역이 없습니다.`);
+    } else {
+      const translated = folderMap.get(rootHandle.name);
+      if (!translated || translated === rootHandle.name) {
+        console.log(`[폴더 이름 변경] 건너뜀 — 최상위 폴더 "${rootHandle.name}"의 번역 결과가 원본과 같습니다.`);
+      } else {
+        try {
+          await rootHandle.move(translated);
+          renamed++;
+          console.log(`[폴더 이름 변경] 완료 — "${rootHandle.name}" → "${translated}"`);
+        } catch (err) {
+          console.warn(`[폴더 이름 변경] 실패 — "${rootHandle.name}" → "${translated}"`, err);
+        }
+      }
     }
   }
+
   for (const { handle, segName } of dirCache.values()) {
-    if (typeof handle.move !== 'function') continue;
+    if (!canMoveDir) break;
     const translated = folderMap.get(segName);
-    if (!translated || translated === segName) continue;
-    try { await handle.move(translated); renamed++; } catch (err) { console.warn('폴더 이름 변경 실패:', segName, err); }
+    if (!translated || translated === segName) {
+      console.log(`[폴더 이름 변경] 건너뜀 — 하위 폴더 "${segName}"에 대한 번역이 없거나 원본과 같습니다.`);
+      continue;
+    }
+    try {
+      await handle.move(translated);
+      renamed++;
+      console.log(`[폴더 이름 변경] 완료 — "${segName}" → "${translated}"`);
+    } catch (err) {
+      console.warn(`[폴더 이름 변경] 실패 — "${segName}" → "${translated}"`, err);
+    }
   }
   return renamed;
 }
