@@ -1903,8 +1903,28 @@ async function getDirHandleAtPath(rootHandle, relDir) {
   return dir;
 }
 
+// 파일명이 실제로 번역됐으면 원본 영상도 그 자리에서 같은 이름으로 바꾼다 (복사 없이 즉시 —
+// FileSystemFileHandle.move 가 있을 때만. 없는 브라우저에서는 원본 이름을 그대로 두고
+// 자막도 원본 이름으로 저장해 자동 로드만은 보장한다).
+async function renameOriginalIfPossible(dir, result) {
+  const useTranslated = result.translatedName && result.translatedName !== result.baseName
+    && !SUBTITLE_EXTS.includes(fileExt(result.fileName)); // 입력이 이미 SRT면 원본을 손대지 않는다
+  if (!useTranslated) return result.baseName;
+
+  try {
+    const videoHandle = await dir.getFileHandle(result.fileName);
+    if (typeof videoHandle.move !== 'function') return result.baseName;
+    await videoHandle.move(result.translatedName + fileExt(result.fileName));
+    return result.translatedName;
+  } catch (err) {
+    console.warn('원본 파일 이름 변경 실패, 원본 이름으로 자막만 저장합니다:', result.fileName, err);
+    return result.baseName;
+  }
+}
+
 // File System Access API로 사용자가 고른 폴더에 SRT를 직접 써넣는다 — 다운로드·압축 해제가 필요 없다.
-// 원본 영상의 이름을 그대로 쓰므로(번역된 이름이 아님) 어떤 플레이어에서도 자동 로드가 보장된다.
+// "파일명 번역"이 켜져 있고 브라우저가 지원하면 원본 영상 이름도 같이 바꿔서 번역된 제목으로 맞추고,
+// 그렇지 않으면 원본 파일명으로 자막을 저장해 자동 로드만은 항상 보장한다.
 if (els.saveToFolderBtn) {
   if (!('showDirectoryPicker' in window)) {
     els.saveToFolderBtn.remove();
@@ -1927,7 +1947,8 @@ if (els.saveToFolderBtn) {
       for (const r of targets) {
         try {
           const dir = await getDirHandleAtPath(rootHandle, r.origRelDir);
-          const fileHandle = await dir.getFileHandle(`${r.baseName}.srt`, { create: true });
+          const srtBaseName = await renameOriginalIfPossible(dir, r);
+          const fileHandle = await dir.getFileHandle(`${srtBaseName}.srt`, { create: true });
           const writable = await fileHandle.createWritable();
           await writable.write(r.translatedSrt || r.originalSrt);
           await writable.close();
