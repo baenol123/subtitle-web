@@ -81,6 +81,11 @@ const STRINGS = {
     needAnthropicKey: '번역에는 Anthropic API 키가 필요합니다.',
     nothingToDo: 'SRT 파일 + "추출만" 조합은 할 일이 없습니다.',
     folderNoMedia: '선택한 폴더에서 지원되는 영상/오디오/자막 파일을 찾지 못했습니다.',
+    saveToFolderDone: (ok, fail) => fail > 0
+      ? `자막 ${ok}개를 폴더에 저장했습니다 (${fail}개는 원본을 찾지 못해 건너뜀 — 처음 선택한 것과 같은 폴더인지 확인해주세요).`
+      : `자막 ${ok}개를 원본 옆에 저장했습니다. 바로 재생해보세요.`,
+    saveToFolderNone: '저장할 자막이 없습니다.',
+    saveToFolderError: (msg) => `폴더 저장 실패: ${msg}`,
     noSubtitles: '추출된 자막이 없습니다. 음성이 있는 파일인지 확인해주세요.',
     chunkProgress: (i, n) => `자막 추출 중... 조각 ${i}/${n}`,
     chunksLabel: (n) => `${n}개 조각`,
@@ -149,6 +154,11 @@ const STRINGS = {
     needAnthropicKey: 'An Anthropic API key is required for translation.',
     nothingToDo: 'SRT file + "extract only" leaves nothing to do.',
     folderNoMedia: 'No supported video/audio/subtitle files were found in the selected folder.',
+    saveToFolderDone: (ok, fail) => fail > 0
+      ? `Saved ${ok} subtitle(s) to the folder (${fail} skipped — the original wasn't found; make sure you picked the same folder you started from).`
+      : `Saved ${ok} subtitle(s) right next to their videos. Try playing one now.`,
+    saveToFolderNone: 'No subtitles to save.',
+    saveToFolderError: (msg) => `Couldn't save to folder: ${msg}`,
     noSubtitles: 'No subtitles were extracted. Please check that the file contains speech.',
     chunkProgress: (i, n) => `Extracting subtitles... chunk ${i}/${n}`,
     chunksLabel: (n) => `${n} chunk(s)`,
@@ -284,7 +294,7 @@ const els = {
   errorBanner: $('errorBanner'),
   resultPanel: $('resultPanel'), resultStats: $('resultStats'),
   resultsList: $('resultsList'), downloadAllBtn: $('downloadAllBtn'),
-  renameBatBtn: $('renameBatBtn'),
+  renameBatBtn: $('renameBatBtn'), saveToFolderBtn: $('saveToFolderBtn'),
 };
 
 // 언어 드롭다운 채우기 — 페이지 언어에 맞는 이름으로, 주요/전체 그룹 분리
@@ -1884,6 +1894,54 @@ els.downloadAllBtn.addEventListener('click', async () => {
   }
 });
 
+// 폴더 안 서브 핸들을 경로 세그먼트를 따라 내려간다 (원본이 있던 폴더이므로 이미 존재해야 함)
+async function getDirHandleAtPath(rootHandle, relDir) {
+  let dir = rootHandle;
+  if (relDir) {
+    for (const seg of relDir.split('/')) dir = await dir.getDirectoryHandle(seg);
+  }
+  return dir;
+}
+
+// File System Access API로 사용자가 고른 폴더에 SRT를 직접 써넣는다 — 다운로드·압축 해제가 필요 없다.
+// 원본 영상의 이름을 그대로 쓰므로(번역된 이름이 아님) 어떤 플레이어에서도 자동 로드가 보장된다.
+if (els.saveToFolderBtn) {
+  if (!('showDirectoryPicker' in window)) {
+    els.saveToFolderBtn.remove();
+  } else {
+    els.saveToFolderBtn.addEventListener('click', async () => {
+      const targets = allResults.filter((r) => !r.error && (r.translatedSrt || r.originalSrt));
+      if (targets.length === 0) { showError(T.saveToFolderNone); return; }
+
+      let rootHandle;
+      try {
+        rootHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      } catch (err) {
+        if (err.name === 'AbortError') return; // 사용자가 폴더 선택을 취소함
+        showError(T.saveToFolderError(err.message ?? String(err)));
+        return;
+      }
+
+      let ok = 0;
+      let fail = 0;
+      for (const r of targets) {
+        try {
+          const dir = await getDirHandleAtPath(rootHandle, r.origRelDir);
+          const fileHandle = await dir.getFileHandle(`${r.baseName}.srt`, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(r.translatedSrt || r.originalSrt);
+          await writable.close();
+          ok++;
+        } catch (err) {
+          console.warn('폴더 자동 저장 실패:', r.fileName, err);
+          fail++;
+        }
+      }
+      setStatus(T.saveToFolderDone(ok, fail));
+    });
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // 파일 하나 처리
 // ─────────────────────────────────────────────────────────────
@@ -2099,6 +2157,10 @@ async function run() {
       els.renameBatBtn.classList.toggle('hidden', renamePairs.length === 0);
       els.renameBatBtn.onclick = () =>
         downloadBat(buildRenameBat(renamePairs), '이름바꾸기.bat');
+    }
+    if (els.saveToFolderBtn && els.saveToFolderBtn.isConnected) {
+      const hasSubtitles = allResults.some((r) => !r.error && (r.translatedSrt || r.originalSrt));
+      els.saveToFolderBtn.classList.toggle('hidden', !hasSubtitles);
     }
 
     els.resultPanel.classList.remove('hidden');
