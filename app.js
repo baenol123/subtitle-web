@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-08-31.5';
+const APP_VERSION = '2026-08-31.6';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -1666,13 +1666,24 @@ function matchPattern(from, key) {
   return key + '*' + ext;
 }
 
-function buildRenamePowerShell(pairs) {
+function buildRenamePowerShell(pairs, folderPairs = []) {
   const entries = pairs
     .filter(({ from, to }) => from !== to)
     .map(({ from, to, dir, key }) => {
       const pattern = matchPattern(from, key);
       return `  [pscustomobject]@{ From=${psQuote(from)}; To=${psQuote(to)}; Dir=${psQuote(dir)}; Pattern=${psQuote(pattern)} }`;
     });
+  const folderEntries = folderPairs
+    .filter(({ from, to }) => from !== to)
+    .map(({ from, to, dir }) => `  [pscustomobject]@{ From=${psQuote(from)}; To=${psQuote(to)}; Dir=${psQuote(dir)} }`);
+
+  // .bat을 "폴더째 선택했을 때의 최상위 폴더" 옆에 두든(권장) 그 폴더 안에 넣든 둘 다 동작하게
+  // 만든다 — 실사용에서 사용자가 최상위 폴더 안에 넣어 두 겹으로 겹치는 경로를 찾는 바람에
+  // 전부 [없음] 처리된 사례가 있었다. 최상위 폴더 이름들을 안 뒤, 지금 작업 폴더의 이름이
+  // 그중 하나와 같으면서 그 이름의 하위 폴더가 없다면 "그 폴더 안"이라고 보고 부모로 옮긴다.
+  const topNames = new Set();
+  for (const { dir } of pairs) { const seg = (dir || '').split('\\')[0]; if (seg) topNames.add(seg); }
+  for (const { from } of folderPairs) { const seg = from.split('\\')[0]; if (seg) topNames.add(seg); }
 
   return [
     '$OutputEncoding = [System.Text.Encoding]::UTF8',
@@ -1681,29 +1692,39 @@ function buildRenamePowerShell(pairs) {
     // -EncodedCommand로 실행하면 $PSScriptRoot가 비어있어 여기서 위치를 잡을 수 없다.
     // 대신 .bat 쪽에서 cd /d "%~dp0" 로 먼저 이동해두고(순수 ASCII라 안전) 그 작업 폴더를
     // PowerShell 자식 프로세스가 그대로 물려받는다.
-    "Write-Host ('폴더: ' + $PWD.Path + ' (폴더째 선택했다면 하위 폴더 구조까지 그대로 유지된 상태여야 합니다)')",
+    `$topNames = @(${[...topNames].map(psQuote).join(', ')})`,
+    '$base = $PWD.Path',
+    'if ($topNames.Count -gt 0) {',
+    '  $leaf = Split-Path $PWD.Path -Leaf',
+    '  if (($topNames -contains $leaf) -and (-not (Test-Path -LiteralPath (Join-Path $PWD.Path $leaf)))) {',
+    '    $base = Split-Path $PWD.Path -Parent',
+    "    Write-Host ('(이 .bat 이 최상위 폴더 안에 있는 것으로 보여 상위 폴더 기준으로 찾습니다: ' + $base + ')')",
+    '  }',
+    '}',
+    "Write-Host ('폴더: ' + $base + ' (폴더째 선택했다면 하위 폴더 구조까지 그대로 유지된 상태여야 합니다)')",
     "Write-Host ''",
     '$missing = 0',
     '$pairs = @(',
     entries.join(",\r\n"),
     ')',
     'foreach ($p in $pairs) {',
-    '  $destPath = if ($p.Dir) { Join-Path $p.Dir $p.To } else { $p.To }',
+    '  $destPath = if ($p.Dir) { Join-Path (Join-Path $base $p.Dir) $p.To } else { Join-Path $base $p.To }',
+    '  $fromFull = Join-Path $base $p.From',
     '  if (Test-Path -LiteralPath $destPath) {',
     "    Write-Host ('[이미 있음] ' + $destPath)",
     '    continue',
     '  }',
-    '  if (Test-Path -LiteralPath $p.From) {',
+    '  if (Test-Path -LiteralPath $fromFull) {',
     '    try {',
-    '      Rename-Item -LiteralPath $p.From -NewName $p.To -ErrorAction Stop',
+    '      Rename-Item -LiteralPath $fromFull -NewName $p.To -ErrorAction Stop',
     "      Write-Host ('[완료] ' + $destPath)",
     '    } catch {',
-    "      Write-Host ('[실패] ' + $p.From)",
+    "      Write-Host ('[실패] ' + $fromFull)",
     '    }',
     '    continue',
     '  }',
     '  if ($p.Pattern) {',
-    "    $searchDir = if ($p.Dir) { $p.Dir } else { '.' }",
+    "    $searchDir = if ($p.Dir) { Join-Path $base $p.Dir } else { $base }",
     '    $candidates = @(Get-ChildItem -LiteralPath $searchDir -Filter $p.Pattern -File -ErrorAction SilentlyContinue)',
     '    if ($candidates.Count -eq 1) {',
     '      try {',
@@ -1718,21 +1739,45 @@ function buildRenamePowerShell(pairs) {
     '      continue',
     '    }',
     '  }',
-    "  Write-Host ('[없음] ' + $p.From)",
+    "  Write-Host ('[없음] ' + $fromFull)",
     '  $missing++',
+    '}',
+    // 폴더 이름도 바꾼다 — 파일을 다 옮긴 뒤에 처리해야 한다(폴더를 먼저 바꾸면 그 안의
+    // 원본 파일 경로를 못 찾는다). 얕은 폴더보다 깊은 폴더를 먼저 처리해야 안전하므로
+    // 호출 쪽(JS)에서 이미 깊은 순으로 정렬해서 넘긴다.
+    '$folderPairs = @(',
+    folderEntries.join(",\r\n"),
+    ')',
+    'foreach ($fp in $folderPairs) {',
+    '  $fDest = if ($fp.Dir) { Join-Path (Join-Path $base $fp.Dir) $fp.To } else { Join-Path $base $fp.To }',
+    '  $fFrom = Join-Path $base $fp.From',
+    '  if (Test-Path -LiteralPath $fDest) {',
+    "    Write-Host ('[폴더 이미 있음] ' + $fDest)",
+    '    continue',
+    '  }',
+    '  if (Test-Path -LiteralPath $fFrom -PathType Container) {',
+    '    try {',
+    '      Rename-Item -LiteralPath $fFrom -NewName $fp.To -ErrorAction Stop',
+    "      Write-Host ('[폴더 완료] ' + $fDest)",
+    '    } catch {',
+    "      Write-Host ('[폴더 실패] ' + $fFrom)",
+    '    }',
+    '  } else {',
+    "    Write-Host ('[폴더 없음] ' + $fFrom)",
+    '  }',
     '}',
     'if ($missing -ge 1) {',
     "  Write-Host ''",
     "  Write-Host ('원본 파일 ' + $missing + '개를 찾지 못했습니다.')",
-    "  Write-Host '이 .bat 을 폴더째 선택했을 때의 최상위 폴더로 옮기고(하위 폴더 구조는 그대로 유지) 다시 실행하세요.'",
+    "  Write-Host '이 .bat 이 실제 파일이 있는 폴더(또는 그 바로 위 폴더)에 있는지 확인하고 다시 실행하세요.'",
     '}',
     "Write-Host '끝났습니다.'",
     "Read-Host '계속하려면 Enter를 누르세요'",
   ].join('\r\n');
 }
 
-function buildRenameBat(pairs) {
-  const encoded = toBase64Utf16LE(buildRenamePowerShell(pairs));
+function buildRenameBat(pairs, folderPairs = []) {
+  const encoded = toBase64Utf16LE(buildRenamePowerShell(pairs, folderPairs));
   return [
     '@echo off',
     // 순수 ASCII 메커니즘(%~dp0)만 쓰므로 cmd의 UTF-8 줄바꿈 버그와 무관하게 안전하다.
@@ -2265,8 +2310,7 @@ async function run() {
     els.downloadAllBtn.classList.toggle('hidden', okResults.length < 2);
 
     // 이름이 실제로 바뀐 파일이 있으면 원본 미디어까지 한 번에 바꿔주는 .bat 을 제공한다.
-    // 원본 미디어는 실제로 origRelDir(번역 전 경로)에 있으므로 그 경로로 찾아야 한다 —
-    // 폴더 자체는 번역하지 않고 그 안의 파일 이름만 바꾼다 (ren은 같은 폴더 안에서만 이름을 바꿀 수 있다).
+    // 원본 미디어는 실제로 origRelDir(번역 전 경로)에 있으므로 그 경로로 찾아야 한다.
     const renamePairs = allResults
       .filter((r) => !r.error && r.translatedName && r.translatedName !== r.baseName)
       .map((r) => {
@@ -2278,10 +2322,37 @@ async function run() {
           key: splitNameAffixes(r.baseName).prefix,   // "01.♥TR0_" — 다른 판을 찾을 때 쓰는 키
         };
       });
+
+    // 폴더 이름도 .bat에서 같이 바꾼다 — 브라우저 쪽 "폴더에 자막 자동 저장"은 Chrome이
+    // 폴더 move()를 아직 구현하지 않아 못 하지만, PowerShell의 Rename-Item은 폴더도
+    // 그대로 지원한다. 얕은 폴더를 먼저 바꾸면 그 아래 원본 경로를 못 찾게 되므로
+    // 깊은 폴더부터 정렬해서 넘긴다.
+    const folderPathSet = new Set();
+    for (const r of allResults) {
+      if (r.error || !r.origRelDir) continue;
+      const segs = r.origRelDir.split('/');
+      for (let i = 0; i < segs.length; i++) folderPathSet.add(segs.slice(0, i + 1).join('/'));
+    }
+    const folderRenamePairs = [...folderPathSet]
+      .map((path) => {
+        const segs = path.split('/');
+        const leaf = segs[segs.length - 1];
+        const translated = translatedFolders.get(leaf);
+        if (!translated || translated === leaf) return null;
+        return {
+          from: path.replace(/\//g, '\\'),
+          to: translated,
+          dir: segs.length > 1 ? segs.slice(0, -1).join('\\') : '',
+          depth: segs.length,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.depth - a.depth);
+
     if (els.renameBatBtn) {
-      els.renameBatBtn.classList.toggle('hidden', renamePairs.length === 0);
+      els.renameBatBtn.classList.toggle('hidden', renamePairs.length === 0 && folderRenamePairs.length === 0);
       els.renameBatBtn.onclick = () =>
-        downloadBat(buildRenameBat(renamePairs), '이름바꾸기.bat');
+        downloadBat(buildRenameBat(renamePairs, folderRenamePairs), '이름바꾸기.bat');
     }
     if (els.saveToFolderBtn && els.saveToFolderBtn.isConnected) {
       const hasSubtitles = allResults.some((r) => !r.error && (r.translatedSrt || r.originalSrt));
