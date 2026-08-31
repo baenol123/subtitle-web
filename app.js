@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-08-31.3';
+const APP_VERSION = '2026-08-31.4';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -1691,27 +1691,32 @@ function buildRenameBat(pairs) {
     '',
     // %1 원본 이름(경로 포함)  %2 바꿀 이름(파일명만)  %3 대체 탐색 패턴(경로 포함, 없으면 빈 문자열)  %4 원본이 있는 폴더(경로, 없으면 빈 문자열)
     // 이름은 반드시 따옴표로 감싸 출력한다. 감싸지 않으면 & 가 든 이름에서 줄이 잘린다.
-    // `if defined` 는 지연확장 없이도 런타임에 평가되므로 for 안에서 후보 수를 셀 수 있다.
+    // 여러 줄짜리 if (...) 블록은 절대 쓰지 않는다 — 번역된 이름에 괄호가 섞여 들어오면
+    // (닫는 괄호 하나가 블록 파싱을 깨서 "X was unexpected at this time"으로 스크립트 전체가
+    // 죽는 사고가 실제로 났다) 블록이 없으면 어떤 문자가 와도 안전하므로 전부 goto 로 분기한다.
     // ren의 대상은 경로 없이 파일명만 허용되므로(같은 폴더 안에서만 이름을 바꿈), 존재 확인은 %~4%~2로 한다.
     ':try',
-    'if exist "%~4%~2" (',
-    '  echo [이미 있음] "%~4%~2"',
-    '  goto :eof',
-    ')',
-    'if exist "%~1" (',
-    '  ren "%~1" "%~2" && echo [완료] "%~4%~2" || echo [실패] "%~1"',
-    '  goto :eof',
-    ')',
+    'if exist "%~4%~2" goto :already',
+    'if exist "%~1" goto :direct',
     'if "%~3"=="" goto :notfound',
     'set "cand="',
     'set "dup="',
     'for %%f in ("%~3") do if defined cand (set "dup=1") else (set "cand=%%f")',
     'if not defined cand goto :notfound',
-    'if defined dup (',
-    '  echo [모호함] "%~3" 에 해당하는 파일이 여러 개라 건너뜁니다',
-    '  goto :eof',
-    ')',
+    'if defined dup goto :ambiguous',
     'ren "%cand%" "%~2" && echo [유사일치] "%~4%~2"   [원본 "%cand%"] || echo [실패] "%cand%"',
+    'goto :eof',
+    '',
+    ':already',
+    'echo [이미 있음] "%~4%~2"',
+    'goto :eof',
+    '',
+    ':direct',
+    'ren "%~1" "%~2" && echo [완료] "%~4%~2" || echo [실패] "%~1"',
+    'goto :eof',
+    '',
+    ':ambiguous',
+    'echo [모호함] "%~3" 에 해당하는 파일이 여러 개라 건너뜁니다',
     'goto :eof',
     '',
     ':notfound',
