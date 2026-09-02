@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-03.3';
+const APP_VERSION = '2026-09-03.4';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -29,7 +29,10 @@ const REFINE_BATCH_SIZE = 40;   // 교정 배치 크기 (Claude) — 고칠 줄�
 const CONTEXT_WINDOW = 3;       // 앞뒤 참고 블록 수
 const MAX_REPEAT = 2;           // 같은 문장 연속 반복 허용 횟수
 const AUDIO_DIRECT_EXTS = ['.mp3', '.m4a', '.wav', '.ogg', '.opus', '.flac', '.webm'];
-const SUBTITLE_EXTS = ['.srt', '.vtt'];
+// .txt도 자막 취급한다 — WEBVTT 헤더+타임스탬프가 그대로 .txt로 저장된 대본 파일이 흔하다.
+// parseSrt는 타임스탬프 없는 덩어리는 그냥 건너뛰므로 진짜 자막이 아닌 .txt를 섞어도
+// 안전하게(빈 결과로) 처리된다.
+const SUBTITLE_EXTS = ['.srt', '.vtt', '.txt'];
 const VIDEO_EXTS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.wmv', '.flv', '.ts', '.m2ts', '.mpg', '.mpeg'];
 // 폴더째 선택/드롭할 때는 accept 속성이 적용되지 않으므로 확장자로 직접 걸러낸다
 const FOLDER_PICK_EXTS = new Set([...SUBTITLE_EXTS, ...AUDIO_DIRECT_EXTS, ...VIDEO_EXTS]);
