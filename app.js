@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-03.2';
+const APP_VERSION = '2026-09-03.3';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -80,6 +80,8 @@ const STRINGS = {
     translatingFilename: '파일명 번역 중...',
     subtitleKind: '자막 → 번역만',
     mediaKind: '영상/오디오 → 추출+번역',
+    reuseKind: '영상/오디오 → 기존 자막 재사용(추출 생략, 번역만)',
+    consumedKind: '자막 → 위 파일이 재사용함(별도 처리 안 함)',
     filesSelected: (n, mb) => `파일 ${n}개 · 총 ${mb} MB`,
     needGroqKey: '자막 추출에는 Groq API 키가 필요합니다.',
     needAnthropicKey: '번역에는 Anthropic API 키가 필요합니다.',
@@ -156,6 +158,8 @@ const STRINGS = {
     translatingFilename: 'Translating file name...',
     subtitleKind: 'subtitle → translate only',
     mediaKind: 'video/audio → extract + translate',
+    reuseKind: 'video/audio → reuse existing subtitle (skip extraction, translate only)',
+    consumedKind: 'subtitle → reused by the file above (not processed separately)',
     filesSelected: (n, mb) => `${n} file(s) · ${mb} MB total`,
     needGroqKey: 'A Groq API key is required for subtitle extraction.',
     needAnthropicKey: 'An Anthropic API key is required for translation.',
@@ -502,8 +506,15 @@ function handleFiles(files, opts = {}) {
   }
   selectedFiles = list;
   const totalMb = (selectedFiles.reduce((sum, f) => sum + f.size, 0) / 1e6).toFixed(1);
+  // 미리보기 목록에도 실제 run()과 같은 짝짓기 결과를 반영한다 —
+  // 그렇지 않으면 짝지어진 미디어도 "추출+번역"으로 표시돼 실제 동작과 어긋나 보인다.
+  const { companionOf } = pairCompanionSubtitles(selectedFiles);
+  const consumedSubtitles = new Set(companionOf.values());
   const lines = selectedFiles.map((f) => {
-    const kind = isSubtitleFile(f) ? T.subtitleKind : T.mediaKind;
+    const kind = consumedSubtitles.has(f) ? T.consumedKind
+      : isSubtitleFile(f) ? T.subtitleKind
+      : companionOf.has(f) ? T.reuseKind
+      : T.mediaKind;
     const path = relDirOf(f) ? `${relDirOf(f)}/` : '';
     return `• ${path}${f.name} (${(f.size / 1e6).toFixed(1)} MB) — ${kind}`;
   });
