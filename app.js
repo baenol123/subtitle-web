@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-03.1';
+const APP_VERSION = '2026-09-03.2';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -2221,16 +2221,26 @@ async function processOne(file, companionSrt = null) {
 // 같은 폴더 + 같은 baseName(확장자 제외)의 미디어 파일과 자막 파일을 짝짓는다.
 // 짝지어진 자막은 미디어 쪽에 흡수되어 재사용되므로 목록에서 따로 처리하지 않는다.
 function pairCompanionSubtitles(files) {
-  const subtitleByKey = new Map();
+  // 두 가지 자막 이름 관례를 모두 지원해야 한다:
+  //  1) 같은 base, 확장자만 다름 — "video.mp4" + "video.srt"
+  //  2) 원본 파일명 전체에 자막 확장자만 이어붙임 — "00.说明.wav" + "00.说明.wav.vtt"
+  //     (자동 생성 캡션에서 흔함 — 이 경우 미디어 파일명 "전체"가 자막의 base가 된다)
+  const mediaByFullName = new Map();  // `dir/파일명.확장자` → 미디어 File
+  const mediaByBaseName = new Map();  // `dir/파일명(확장자 제외)` → 미디어 File
   for (const f of files) {
-    if (isSubtitleFile(f)) subtitleByKey.set(`${relDirOf(f)}/${f.name.replace(/\.[^.]+$/, '')}`, f);
+    if (isSubtitleFile(f)) continue;
+    const dir = relDirOf(f);
+    mediaByFullName.set(`${dir}/${f.name}`, f);
+    mediaByBaseName.set(`${dir}/${f.name.replace(/\.[^.]+$/, '')}`, f);
   }
   const companionOf = new Map();   // 미디어 File → 짝지어진 자막 File
   const consumed = new Set();      // 미디어에 흡수된 자막 File(별도 처리 제외)
   for (const f of files) {
-    if (isSubtitleFile(f)) continue;
-    const sub = subtitleByKey.get(`${relDirOf(f)}/${f.name.replace(/\.[^.]+$/, '')}`);
-    if (sub) { companionOf.set(f, sub); consumed.add(sub); }
+    if (!isSubtitleFile(f)) continue;
+    const dir = relDirOf(f);
+    const stripped = f.name.replace(/\.[^.]+$/, ''); // 자막 확장자만 뗀 상태
+    const media = mediaByFullName.get(`${dir}/${stripped}`) || mediaByBaseName.get(`${dir}/${stripped}`);
+    if (media && !companionOf.has(media)) { companionOf.set(media, f); consumed.add(f); }
   }
   return { companionOf, filesToProcess: files.filter((f) => !consumed.has(f)) };
 }
