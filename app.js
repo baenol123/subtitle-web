@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-08-31.7';
+const APP_VERSION = '2026-09-03.1';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
