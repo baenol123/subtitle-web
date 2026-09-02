@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-08-31.6';
+const APP_VERSION = '2026-08-31.7';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -2116,8 +2116,11 @@ if (els.saveToFolderBtn) {
 // 파일 하나 처리
 // ─────────────────────────────────────────────────────────────
 
-async function processOne(file) {
+async function processOne(file, companionSrt = null) {
   const isSubtitle = isSubtitleFile(file);
+  // 같은 폴더에 baseName이 같은 .srt가 이미 있으면(companionSrt) 그 미디어 파일은
+  // STT를 다시 돌리지 않고 그 자막을 그대로 재사용한다 — run()에서 짝을 찾아 넘겨준다.
+  const reuseSrt = companionSrt || (isSubtitle ? file : null);
   const skipTranslate = els.skipTranslate.checked;
   const baseName = file.name.replace(/\.[^.]+$/, '');
   const result = {
@@ -2138,9 +2141,9 @@ async function processOne(file) {
   resetSteps();
   let blocks;
 
-  if (isSubtitle) {
+  if (reuseSrt) {
     setStep('audio', 'skipped'); setStep('stt', 'skipped'); setStep('filter', 'skipped'); setStep('refine', 'skipped');
-    blocks = parseSrt(await file.text());
+    blocks = parseSrt(await reuseSrt.text());
     result.originalSrt = buildSrt(blocks);
   } else {
     // 1. 오디오 추출
@@ -2215,10 +2218,28 @@ async function processOne(file) {
 // 메인 파이프라인 (여러 파일 순차 처리)
 // ─────────────────────────────────────────────────────────────
 
+// 같은 폴더 + 같은 baseName(확장자 제외)의 미디어 파일과 자막 파일을 짝짓는다.
+// 짝지어진 자막은 미디어 쪽에 흡수되어 재사용되므로 목록에서 따로 처리하지 않는다.
+function pairCompanionSubtitles(files) {
+  const subtitleByKey = new Map();
+  for (const f of files) {
+    if (isSubtitleFile(f)) subtitleByKey.set(`${relDirOf(f)}/${f.name.replace(/\.[^.]+$/, '')}`, f);
+  }
+  const companionOf = new Map();   // 미디어 File → 짝지어진 자막 File
+  const consumed = new Set();      // 미디어에 흡수된 자막 File(별도 처리 제외)
+  for (const f of files) {
+    if (isSubtitleFile(f)) continue;
+    const sub = subtitleByKey.get(`${relDirOf(f)}/${f.name.replace(/\.[^.]+$/, '')}`);
+    if (sub) { companionOf.set(f, sub); consumed.add(sub); }
+  }
+  return { companionOf, filesToProcess: files.filter((f) => !consumed.has(f)) };
+}
+
 async function run() {
   const skipTranslate = els.skipTranslate.checked;
-  const hasMedia = selectedFiles.some((f) => !isSubtitleFile(f));
-  const allSubtitles = selectedFiles.every((f) => isSubtitleFile(f));
+  const { companionOf, filesToProcess } = pairCompanionSubtitles(selectedFiles);
+  const hasMedia = filesToProcess.some((f) => !isSubtitleFile(f) && !companionOf.has(f));
+  const allSubtitles = filesToProcess.every((f) => isSubtitleFile(f) || companionOf.has(f));
 
   if (hasMedia && groqKeys().length === 0) {
     showError(T.needGroqKey);
@@ -2265,18 +2286,18 @@ async function run() {
     // "4-1 방과후"와 "4-2 방과후"는 항상 같은 번역을 받는다.
     if (!skipTranslate && els.renameKorean.checked) {
       setStatus(T.translatingFilename);
-      const baseNames = selectedFiles.map((f) => f.name.replace(/\.[^.]+$/, ''));
-      const relDirs = [...new Set(selectedFiles.map((f) => relDirOf(f)).filter(Boolean))];
+      const baseNames = filesToProcess.map((f) => f.name.replace(/\.[^.]+$/, ''));
+      const relDirs = [...new Set(filesToProcess.map((f) => relDirOf(f)).filter(Boolean))];
       // 파일명 + 폴더명을 한 요청으로 합쳐 보낸다 (요청 횟수를 늘리지 않기 위해)
       ({ files: translatedNames, folders: translatedFolders } = await translateNamesAndFolders(baseNames, relDirs));
     }
 
-    for (const [i, file] of selectedFiles.entries()) {
+    for (const [i, file] of filesToProcess.entries()) {
       checkCancelled();
-      currentFileLabel = selectedFiles.length > 1 ? `[${i + 1}/${selectedFiles.length}] ${file.name}` : file.name;
+      currentFileLabel = filesToProcess.length > 1 ? `[${i + 1}/${filesToProcess.length}] ${file.name}` : file.name;
       setStatus('...');
       try {
-        const result = await processOne(file);
+        const result = await processOne(file, companionOf.get(file));
         allResults.push(result);
       } catch (err) {
         // 취소, 키 오류, Groq 한도 소진은 전체 중단 — 그 외에는 이 파일만 실패 처리하고 계속
@@ -2306,7 +2327,7 @@ async function run() {
   const okResults = allResults.filter((r) => !r.error);
   if (allResults.length > 0) {
     for (const r of allResults) renderResultRow(r);
-    els.resultStats.textContent = T.batchDone(okResults.length, selectedFiles.length);
+    els.resultStats.textContent = T.batchDone(okResults.length, filesToProcess.length);
     els.downloadAllBtn.classList.toggle('hidden', okResults.length < 2);
 
     // 이름이 실제로 바뀐 파일이 있으면 원본 미디어까지 한 번에 바꿔주는 .bat 을 제공한다.
