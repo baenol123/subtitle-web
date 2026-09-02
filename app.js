@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-03.4';
+const APP_VERSION = '2026-09-03.5';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -85,6 +85,7 @@ const STRINGS = {
     mediaKind: '영상/오디오 → 추출+번역',
     reuseKind: '영상/오디오 → 기존 자막 재사용(추출 생략, 번역만)',
     consumedKind: '자막 → 위 파일이 재사용함(별도 처리 안 함)',
+    nameOnlyKind: '기타 파일 → 파일명만 번역(내용은 처리 안 함)',
     filesSelected: (n, mb) => `파일 ${n}개 · 총 ${mb} MB`,
     needGroqKey: '자막 추출에는 Groq API 키가 필요합니다.',
     needAnthropicKey: '번역에는 Anthropic API 키가 필요합니다.',
@@ -163,6 +164,7 @@ const STRINGS = {
     mediaKind: 'video/audio → extract + translate',
     reuseKind: 'video/audio → reuse existing subtitle (skip extraction, translate only)',
     consumedKind: 'subtitle → reused by the file above (not processed separately)',
+    nameOnlyKind: 'other file → file name only (content not processed)',
     filesSelected: (n, mb) => `${n} file(s) · ${mb} MB total`,
     needGroqKey: 'A Groq API key is required for subtitle extraction.',
     needAnthropicKey: 'An Anthropic API key is required for translation.',
@@ -381,6 +383,7 @@ if (els.model) {
 // ─────────────────────────────────────────────────────────────
 
 let selectedFiles = [];
+let extraFiles = []; // 폴더째 선택했을 때 오디오/영상/자막이 아닌 파일들 — 내용 처리는 안 하고 파일명만 번역 대상에 넣는다
 let ffmpeg = null;
 let cancelled = false;
 let abortController = null;
@@ -504,17 +507,24 @@ function handleFiles(files, opts = {}) {
   let list = Array.from(files);
   if (list.length === 0) return;
   if (opts.filterExts) {
-    list = list.filter((f) => isPickableMediaExt(f.name));
-    if (list.length === 0) { showError(T.folderNoMedia); return; }
+    // 오디오/영상/자막이 아닌 파일(이미지 등)은 내용 처리는 안 하지만, 폴더째 선택한
+    // 이상 파일명만이라도 번역 대상에 넣는다 — 뒤에서 다른 파일명들과 한 요청으로 합쳐 보낸다.
+    const picked = list.filter((f) => isPickableMediaExt(f.name));
+    if (picked.length === 0) { showError(T.folderNoMedia); return; }
+    extraFiles = list.filter((f) => !isPickableMediaExt(f.name));
+    list = picked;
+  } else {
+    extraFiles = [];
   }
   selectedFiles = list;
-  const totalMb = (selectedFiles.reduce((sum, f) => sum + f.size, 0) / 1e6).toFixed(1);
+  const totalMb = ([...selectedFiles, ...extraFiles].reduce((sum, f) => sum + f.size, 0) / 1e6).toFixed(1);
   // 미리보기 목록에도 실제 run()과 같은 짝짓기 결과를 반영한다 —
   // 그렇지 않으면 짝지어진 미디어도 "추출+번역"으로 표시돼 실제 동작과 어긋나 보인다.
   const { companionOf } = pairCompanionSubtitles(selectedFiles);
   const consumedSubtitles = new Set(companionOf.values());
-  const lines = selectedFiles.map((f) => {
-    const kind = consumedSubtitles.has(f) ? T.consumedKind
+  const lines = [...selectedFiles, ...extraFiles].map((f) => {
+    const kind = extraFiles.includes(f) ? T.nameOnlyKind
+      : consumedSubtitles.has(f) ? T.consumedKind
       : isSubtitleFile(f) ? T.subtitleKind
       : companionOf.has(f) ? T.reuseKind
       : T.mediaKind;
@@ -523,7 +533,7 @@ function handleFiles(files, opts = {}) {
   });
   els.fileInfo.innerHTML = '';
   els.fileInfo.append(
-    Object.assign(document.createElement('div'), { textContent: T.filesSelected(selectedFiles.length, totalMb) }),
+    Object.assign(document.createElement('div'), { textContent: T.filesSelected(selectedFiles.length + extraFiles.length, totalMb) }),
     ...lines.map((l) => Object.assign(document.createElement('div'), { textContent: l }))
   );
   els.fileInfo.classList.remove('hidden');
@@ -2310,9 +2320,11 @@ async function run() {
     // "4-1 방과후"와 "4-2 방과후"는 항상 같은 번역을 받는다.
     if (!skipTranslate && els.renameKorean.checked) {
       setStatus(T.translatingFilename);
-      const baseNames = filesToProcess.map((f) => f.name.replace(/\.[^.]+$/, ''));
-      const relDirs = [...new Set(filesToProcess.map((f) => relDirOf(f)).filter(Boolean))];
-      // 파일명 + 폴더명을 한 요청으로 합쳐 보낸다 (요청 횟수를 늘리지 않기 위해)
+      // extraFiles(이미지 등 내용은 처리 안 하는 파일)도 이름만은 같은 요청에 끼워 번역한다
+      // (요청 횟수를 늘리지 않기 위해 — filesToProcess와 한 번에 모아 보낸다).
+      const namedFiles = [...filesToProcess, ...extraFiles];
+      const baseNames = namedFiles.map((f) => f.name.replace(/\.[^.]+$/, ''));
+      const relDirs = [...new Set(namedFiles.map((f) => relDirOf(f)).filter(Boolean))];
       ({ files: translatedNames, folders: translatedFolders } = await translateNamesAndFolders(baseNames, relDirs));
     }
 
@@ -2356,17 +2368,36 @@ async function run() {
 
     // 이름이 실제로 바뀐 파일이 있으면 원본 미디어까지 한 번에 바꿔주는 .bat 을 제공한다.
     // 원본 미디어는 실제로 origRelDir(번역 전 경로)에 있으므로 그 경로로 찾아야 한다.
-    const renamePairs = allResults
-      .filter((r) => !r.error && r.translatedName && r.translatedName !== r.baseName)
-      .map((r) => {
-        const dir = r.origRelDir ? `${r.origRelDir.replace(/\//g, '\\')}\\` : '';
+    // extraFiles(이미지 등 내용은 처리 안 한 파일)도 이름만 번역됐다면 같이 리네임 대상에 넣는다.
+    const extraRenamePairs = extraFiles
+      .map((f) => {
+        const baseName = f.name.replace(/\.[^.]+$/, '');
+        const translatedName = translatedNames.get(baseName);
+        if (!translatedName || translatedName === baseName) return null;
+        const origRelDir = relDirOf(f);
+        const dir = origRelDir ? `${origRelDir.replace(/\//g, '\\')}\\` : '';
         return {
-          from: dir + r.fileName,
-          to: r.translatedName + fileExt(r.fileName),
+          from: dir + f.name,
+          to: translatedName + fileExt(f.name),
           dir,
-          key: splitNameAffixes(r.baseName).prefix,   // "01.♥TR0_" — 다른 판을 찾을 때 쓰는 키
+          key: splitNameAffixes(baseName).prefix,
         };
-      });
+      })
+      .filter(Boolean);
+    const renamePairs = [
+      ...allResults
+        .filter((r) => !r.error && r.translatedName && r.translatedName !== r.baseName)
+        .map((r) => {
+          const dir = r.origRelDir ? `${r.origRelDir.replace(/\//g, '\\')}\\` : '';
+          return {
+            from: dir + r.fileName,
+            to: r.translatedName + fileExt(r.fileName),
+            dir,
+            key: splitNameAffixes(r.baseName).prefix,   // "01.♥TR0_" — 다른 판을 찾을 때 쓰는 키
+          };
+        }),
+      ...extraRenamePairs,
+    ];
 
     // 폴더 이름도 .bat에서 같이 바꾼다 — 브라우저 쪽 "폴더에 자막 자동 저장"은 Chrome이
     // 폴더 move()를 아직 구현하지 않아 못 하지만, PowerShell의 Rename-Item은 폴더도
@@ -2376,6 +2407,13 @@ async function run() {
     for (const r of allResults) {
       if (r.error || !r.origRelDir) continue;
       const segs = r.origRelDir.split('/');
+      for (let i = 0; i < segs.length; i++) folderPathSet.add(segs.slice(0, i + 1).join('/'));
+    }
+    // extraFiles가 들어있는 폴더(이미지 전용 폴더 등)도 폴더 리네임 대상에 포함시킨다.
+    for (const f of extraFiles) {
+      const rd = relDirOf(f);
+      if (!rd) continue;
+      const segs = rd.split('/');
       for (let i = 0; i < segs.length; i++) folderPathSet.add(segs.slice(0, i + 1).join('/'));
     }
     const folderRenamePairs = [...folderPathSet]
