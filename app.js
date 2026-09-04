@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-05.2';
+const APP_VERSION = '2026-09-05.3';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -1893,14 +1893,40 @@ function buildRenamePowerShell(pairs, folderPairs = []) {
   ].join('\r\n');
 }
 
+// 페이로드(base64)를 뒤에 붙일 때 쓰는 구분선. base64 알파벳(A-Za-z0-9+/=)에는
+// '@'가 없으므로 데이터와 절대 헷갈리지 않는다.
+const BAT_PAYLOAD_MARK = '@@SUBTITLE_FACTORY_PAYLOAD@@';
+
 function buildRenameBat(pairs, folderPairs = []) {
   const encoded = toBase64Utf16LE(buildRenamePowerShell(pairs, folderPairs));
+  // -EncodedCommand로 base64를 "명령줄 인자"로 넘기면 cmd.exe의 명령줄 길이 제한
+  // (실사용 기준 약 8191자)에 걸린다 — 파일이 수십 개만 돼도 페이로드가 그 길이를
+  // 가볍게 넘어서 "시스템이 지정된 프로그램을 실행할 수 없습니다"로 통째로 실패한다
+  // (실사용자가 46개 파일짜리 폴더에서 실제로 재현). 그래서 페이로드는 .bat 파일
+  // 자체의 끝에 데이터로 실어 보내고, PowerShell이 자신을 호출한 .bat 파일(%~f0)을
+  // 텍스트로 읽어 그 부분만 잘라 디코드·실행한다 — 명령줄에는 파일 크기와 무관한
+  // 짧고 고정된 스크립트만 올라가므로 길이 제한과 무관해진다.
+  const psReader = [
+    `$lines=Get-Content -LiteralPath '%~f0' -Encoding UTF8`,
+    `$idx=[Array]::IndexOf($lines,'${BAT_PAYLOAD_MARK}')`,
+    `if($idx -lt 0){Write-Host 'PAYLOAD marker not found.';exit 1}`,
+    `$b64=($lines[($idx+1)..($lines.Length-1)] -join '')`,
+    `$bytes=[Convert]::FromBase64String($b64)`,
+    `$script=[Text.Encoding]::Unicode.GetString($bytes)`,
+    `Invoke-Expression $script`,
+  ].join(';');
+  // base64 자체는 개행이 없어도 되지만, 한 줄에 다 몰아넣으면 텍스트 편집기에서
+  // 다루기 불편해지는 것 말고는 문제가 없다 — 그래도 가독성을 위해 줄바꿈해 둔다.
+  const payloadLines = encoded.match(/.{1,200}/g) ?? [];
   return [
     '@echo off',
     // 순수 ASCII 메커니즘(%~dp0)만 쓰므로 cmd의 UTF-8 줄바꿈 버그와 무관하게 안전하다.
     'cd /d "%~dp0"',
-    `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encoded}`,
+    `powershell -NoProfile -ExecutionPolicy Bypass -Command "${psReader}"`,
     'if errorlevel 1 pause',
+    'goto :eof',
+    BAT_PAYLOAD_MARK,
+    ...payloadLines,
     '',
   ].join('\r\n');
 }
