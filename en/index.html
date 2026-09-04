@@ -80,6 +80,10 @@
           Anthropic API key <span class="meta">— for translation (Claude models) · <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a> (paid)</span>
           <input type="password" id="anthropicKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
         </label>
+        <label>
+          OpenAI API key <span class="meta">— for translation (GPT models) · <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer noopener">platform.openai.com</a> (paid)</span>
+          <input type="password" id="openaiKey" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+        </label>
       </div>
       <details>
         <summary>Backup Groq keys (optional) — used automatically when the free-tier limit is hit. Limits are per account, so backup keys must come from different Groq accounts.</summary>
@@ -139,6 +143,9 @@
               <option value="claude-haiku-4-5">Haiku 4.5 — fast &amp; cheap</option>
               <option value="claude-sonnet-5">Sonnet 5 — balanced</option>
               <option value="claude-opus-5">Opus 5 — highest quality</option>
+            </optgroup>
+            <optgroup label="GPT — OpenAI key · paid">
+              <option value="gpt-5.6-luna">GPT 5.6 Luna — cheap</option>
             </optgroup>
           </select>
         </label>

@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-05.1';
+const APP_VERSION = '2026-09-05.2';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -74,6 +74,10 @@ const STRINGS = {
     geminiError: (s, b) => `Gemini API 오류 (${s}): ${b}`,
     geminiEmpty: (r) => `Gemini가 응답을 반환하지 않았습니다 (${r})`,
     needGeminiKey: 'Gemini 모델을 선택했습니다 — Google Gemini API 키가 필요합니다.',
+    needOpenaiKey: 'GPT 모델을 선택했습니다 — OpenAI API 키가 필요합니다.',
+    openaiRateWait: (w) => `OpenAI 사용량 제한 — ${w}초 대기 후 재시도`,
+    openaiError: (s, b) => `OpenAI API 오류 (${s}): ${b}`,
+    openaiEmpty: 'OpenAI가 빈 응답을 반환했습니다.',
     noTranslationInResponse: '응답에 번역이 없습니다.',
     translating: (done, total) => `번역 중... ${done}/${total} 블록`,
     refining: (done, total) => `AI 교정 중... ${done}/${total} 블록`,
@@ -154,6 +158,10 @@ const STRINGS = {
     geminiError: (s, b) => `Gemini API error (${s}): ${b}`,
     geminiEmpty: (r) => `Gemini returned no response (${r})`,
     needGeminiKey: 'A Google Gemini API key is required for the selected Gemini model.',
+    needOpenaiKey: 'A GPT model is selected — an OpenAI API key is required.',
+    openaiRateWait: (w) => `OpenAI rate limit — retrying in ${w}s`,
+    openaiError: (s, b) => `OpenAI API error (${s}): ${b}`,
+    openaiEmpty: 'OpenAI returned an empty response.',
     noTranslationInResponse: 'No translation in the response.',
     translating: (done, total) => `Translating... ${done}/${total} blocks`,
     refining: (done, total) => `Proofreading... ${done}/${total} blocks`,
@@ -302,7 +310,7 @@ const $ = (id) => document.getElementById(id);
 const els = {
   groqKey: $('groqKey'), groqKey2: $('groqKey2'), groqKey3: $('groqKey3'),
   anthropicKey: $('anthropicKey'), geminiKey: $('geminiKey'),
-  geminiKey2: $('geminiKey2'), geminiKey3: $('geminiKey3'),
+  geminiKey2: $('geminiKey2'), geminiKey3: $('geminiKey3'), openaiKey: $('openaiKey'),
   sourceLang: $('sourceLang'), targetLang: $('targetLang'), model: $('model'),
   whisperModel: $('whisperModel'),
   skipTranslate: $('skipTranslate'), renameKorean: $('renameKorean'), aiRefine: $('aiRefine'),
@@ -351,7 +359,7 @@ function populateLanguageSelects() {
 populateLanguageSelects();
 
 // 설정 localStorage 저장/복원 (드롭다운을 채운 뒤에 복원해야 저장값이 적용됨)
-const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'sourceLang', 'targetLang', 'model', 'whisperModel', 'styleGuide', 'glossary', 'corrections'];
+const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'openaiKey', 'sourceLang', 'targetLang', 'model', 'whisperModel', 'styleGuide', 'glossary', 'corrections'];
 for (const key of PERSIST) {
   if (!els[key]) continue; // 캐시된 옛 HTML에 아직 없는 입력칸은 건너뛴다
   const saved = localStorage.getItem(`subweb-${key}`);
@@ -980,6 +988,9 @@ class ThinkingUnsupportedError extends Error {}
 // (남은 파일 수만큼 헛요청만 쌓인다) 발견 즉시 전체 중단한다.
 class AnthropicFatalError extends Error {}
 
+// OpenAI 키/모델 오류 — 재시도 무의미, 즉시 전체 중단용
+class OpenAiFatalError extends Error {}
+
 // Gemini가 빈 응답을 준 이유 중 안전 필터에 해당하는 값들
 const REFUSAL_REASONS = /SAFETY|PROHIBITED|BLOCKLIST|RECITATION|IMAGE_SAFETY/i;
 
@@ -994,15 +1005,19 @@ function isFatalApiError(err) {
     err instanceof GeminiFatalError ||
     err instanceof ThinkingUnsupportedError ||
     err instanceof AnthropicFatalError ||
+    err instanceof OpenAiFatalError ||
     err instanceof Anthropic.AuthenticationError ||
     err instanceof Anthropic.PermissionDeniedError ||
     err instanceof Anthropic.NotFoundError
   );
 }
 
-// 선택된 모델이 Gemini인지 (모델 id로 번역 엔진을 라우팅)
+// 선택된 모델이 Gemini/GPT인지 (모델 id로 번역 엔진을 라우팅)
 function isGeminiModel() {
   return els.model.value.startsWith('gemini');
+}
+function isOpenAiModel() {
+  return els.model.value.startsWith('gpt');
 }
 
 // Anthropic 클라이언트는 키가 바뀌지 않는 한 재사용
@@ -1213,9 +1228,83 @@ async function callGemini(prompt) {
   }
 }
 
-// 선택된 모델에 따라 Claude/Gemini로 라우팅 — 반환 형식은 동일한 JSON 객체
+// OpenAI Chat Completions API. Gemini/Claude와 달리 SDK 없이 fetch로 직접 호출한다.
+async function callOpenAi(prompt) {
+  const model = els.model.value;
+  const key = els.openaiKey.value.trim();
+
+  for (let attempt = 1; ; attempt++) {
+    checkCancelled();
+    const body = {
+      model,
+      messages: [{ role: 'user', content: prompt }],
+    };
+    body.response_format = rejects('structuredOutput', model)
+      ? { type: 'json_object' }
+      : { type: 'json_schema', json_schema: { name: 'translation_batch', strict: true, schema: TRANSLATION_SCHEMA } };
+    // GPT 5.x 계열은 추론(reasoning)이 기본 켜져 있고 그 토큰이 출력 요금으로 과금된다.
+    // 번역에는 불필요하므로 끈다 — Claude의 thinking:disabled 와 같은 이유.
+    // 거부되면 (Claude와 동일하게) 빼지 않고 중단한다: 빼는 폴백은 추론을 켠 채로
+    // 조용히 요금을 물릴 뿐이라, 새는 것보다 멈추고 알리는 편이 낫다.
+    if (!rejects('thinking', model)) body.reasoning_effort = 'none';
+
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify(body),
+      signal: abortController.signal,
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+
+      if (res.status === 400 && body.reasoning_effort && /reasoning_effort/i.test(errBody)) {
+        console.error(`reasoning_effort:none 이 거부되었습니다 (${model}):`, errBody);
+        markRejected('thinking', model);
+        throw new ThinkingUnsupportedError(T.thinkingRejected(model));
+      }
+
+      // 구조화 출력(json_schema)을 거부하는 모델이면 일반 json_object 모드로 전환해 재시도
+      if (res.status === 400 && !rejects('structuredOutput', model) && /json_schema|response_format/i.test(errBody)) {
+        console.warn(`구조화 출력이 거부되어 일반 JSON 모드로 전환합니다 (${model}):`, errBody.slice(0, 300));
+        markRejected('structuredOutput', model);
+        continue;
+      }
+
+      if (res.status === 429 && attempt <= 3) {
+        const wait = 30;
+        setStatus(T.openaiRateWait(wait));
+        await sleep(wait * 1000);
+        continue;
+      }
+
+      const message = T.openaiError(res.status, errBody.slice(0, 300));
+      if ([400, 401, 403, 404].includes(res.status)) throw new OpenAiFatalError(message);
+      throw new Error(message);
+    }
+
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content ?? '';
+    if (!text.trim()) throw new Error(T.openaiEmpty);
+
+    const truncatedByLimit = data.choices?.[0]?.finish_reason === 'length';
+    try {
+      const parsed = JSON.parse(extractJsonPayload(text));
+      if (truncatedByLimit) parsed.truncated = true;
+      return parsed;
+    } catch (err) {
+      const salvaged = salvageTranslations(text);
+      if (salvaged.length > 0) return { translations: salvaged, truncated: true };
+      throw err;
+    }
+  }
+}
+
+// 선택된 모델에 따라 Claude/Gemini/GPT로 라우팅 — 반환 형식은 동일한 JSON 객체
 async function callModel(prompt) {
-  return isGeminiModel() ? await callGemini(prompt) : await callClaude(prompt);
+  if (isGeminiModel()) return await callGemini(prompt);
+  if (isOpenAiModel()) return await callOpenAi(prompt);
+  return await callClaude(prompt);
 }
 
 // 실패 시 이등분 재시도 — 문제 블록만 남기고 나머지는 살린다
@@ -2319,6 +2408,11 @@ async function run() {
     if (isGeminiModel()) {
       if (geminiKeys().length === 0) {
         showError(T.needGeminiKey);
+        return;
+      }
+    } else if (isOpenAiModel()) {
+      if (!els.openaiKey.value.trim()) {
+        showError(T.needOpenaiKey);
         return;
       }
     } else if (!els.anthropicKey.value.trim()) {

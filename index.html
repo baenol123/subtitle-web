@@ -89,6 +89,10 @@
           Anthropic API 키 <span class="meta">— 번역용(Claude 모델 선택 시) · <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a> (유료)</span>
           <input type="password" id="anthropicKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
         </label>
+        <label>
+          OpenAI API 키 <span class="meta">— 번역용(GPT 모델 선택 시) · <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer noopener">platform.openai.com</a> (유료)</span>
+          <input type="password" id="openaiKey" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+        </label>
       </div>
       <details>
         <summary>Groq 예비 키 (선택) — 무료 한도 초과 시 자동으로 전환됩니다. 한도는 계정 단위라 다른 계정에서 발급한 키여야 효과가 있습니다.</summary>
@@ -149,6 +153,9 @@
               <option value="claude-haiku-4-5">Haiku 4.5 — 빠름/저렴</option>
               <option value="claude-sonnet-5">Sonnet 5 — 균형</option>
               <option value="claude-opus-5">Opus 5 — 고품질</option>
+            </optgroup>
+            <optgroup label="GPT — OpenAI 키 · 유료">
+              <option value="gpt-5.6-luna">GPT 5.6 Luna — 저렴</option>
             </optgroup>
           </select>
         </label>
