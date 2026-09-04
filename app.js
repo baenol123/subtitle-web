@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-03.5';
+const APP_VERSION = '2026-09-05.1';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -86,6 +86,7 @@ const STRINGS = {
     reuseKind: '영상/오디오 → 기존 자막 재사용(추출 생략, 번역만)',
     consumedKind: '자막 → 위 파일이 재사용함(별도 처리 안 함)',
     nameOnlyKind: '기타 파일 → 파일명만 번역(내용은 처리 안 함)',
+    seReuseKind: '영상/오디오 → 효과음 없는 판과 대사 동일, 그 자막 재사용(추출 생략)',
     filesSelected: (n, mb) => `파일 ${n}개 · 총 ${mb} MB`,
     needGroqKey: '자막 추출에는 Groq API 키가 필요합니다.',
     needAnthropicKey: '번역에는 Anthropic API 키가 필요합니다.',
@@ -165,6 +166,7 @@ const STRINGS = {
     reuseKind: 'video/audio → reuse existing subtitle (skip extraction, translate only)',
     consumedKind: 'subtitle → reused by the file above (not processed separately)',
     nameOnlyKind: 'other file → file name only (content not processed)',
+    seReuseKind: 'video/audio → same dialogue as the SE-less version, reusing its subtitle (skip extraction)',
     filesSelected: (n, mb) => `${n} file(s) · ${mb} MB total`,
     needGroqKey: 'A Groq API key is required for subtitle extraction.',
     needAnthropicKey: 'An Anthropic API key is required for translation.',
@@ -520,12 +522,14 @@ function handleFiles(files, opts = {}) {
   const totalMb = ([...selectedFiles, ...extraFiles].reduce((sum, f) => sum + f.size, 0) / 1e6).toFixed(1);
   // 미리보기 목록에도 실제 run()과 같은 짝짓기 결과를 반영한다 —
   // 그렇지 않으면 짝지어진 미디어도 "추출+번역"으로 표시돼 실제 동작과 어긋나 보인다.
-  const { companionOf } = pairCompanionSubtitles(selectedFiles);
+  const { companionOf, filesToProcess: afterCompanionPreview } = pairCompanionSubtitles(selectedFiles);
+  const { primaryOf: primaryOfPreview } = pairSeVariants(afterCompanionPreview);
   const consumedSubtitles = new Set(companionOf.values());
   const lines = [...selectedFiles, ...extraFiles].map((f) => {
     const kind = extraFiles.includes(f) ? T.nameOnlyKind
       : consumedSubtitles.has(f) ? T.consumedKind
       : isSubtitleFile(f) ? T.subtitleKind
+      : primaryOfPreview.has(f) ? T.seReuseKind
       : companionOf.has(f) ? T.reuseKind
       : T.mediaKind;
     const path = relDirOf(f) ? `${relDirOf(f)}/` : '';
@@ -2269,9 +2273,40 @@ function pairCompanionSubtitles(files) {
   return { companionOf, filesToProcess: files.filter((f) => !consumed.has(f)) };
 }
 
+// splitNameAffixes가 떼어낸 suffix 중 "효과음 없음" 계열만 골라낸다.
+// (있음 계열이나 맨 "_SE"는 걸리지 않게 해서 애매하면 합치지 않는다.)
+const NO_SE_SUFFIX_RE = /less|なし|無し|カット|cut|off|オフ/i;
+
+// 같은 폴더에서 제목(prefix+body)이 같고 "효과음 있음/없음" suffix만 다른 미디어들을 묶는다.
+// 효과음 없는 판이 정확히 하나면 그걸로만 STT를 돌리고, 나머지(효과음 있는 판 등)는
+// 그 결과를 그대로 재사용한다 — 같은 대사를 효과음 유무만 다르게 두 번 STT할 필요가 없다.
+function pairSeVariants(files) {
+  const groups = new Map(); // `dir::prefix::body` → [{ file, suffix }]
+  for (const f of files) {
+    if (isSubtitleFile(f)) continue;
+    const parts = splitNameAffixes(f.name.replace(/\.[^.]+$/, ''));
+    const key = `${relDirOf(f)}::${parts.prefix}::${parts.body}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ file: f, suffix: parts.suffix });
+  }
+  const primaryOf = new Map(); // 효과음 있는 판 등 File → 효과음 없는 판 File
+  for (const entries of groups.values()) {
+    if (entries.length < 2) continue;
+    const noSe = entries.filter((e) => NO_SE_SUFFIX_RE.test(e.suffix));
+    if (noSe.length !== 1) continue; // "효과음 없음"이 정확히 하나로 확인될 때만 합친다
+    const primary = noSe[0].file;
+    for (const e of entries) {
+      if (e.file !== primary) primaryOf.set(e.file, primary);
+    }
+  }
+  return { primaryOf, filesToProcess: files.filter((f) => !primaryOf.has(f)) };
+}
+
 async function run() {
   const skipTranslate = els.skipTranslate.checked;
-  const { companionOf, filesToProcess } = pairCompanionSubtitles(selectedFiles);
+  const { companionOf, filesToProcess: afterCompanion } = pairCompanionSubtitles(selectedFiles);
+  // 효과음 있음/없음만 다른 동일 대사 판은 효과음 없는 쪽 하나로만 STT를 돌린다.
+  const { primaryOf, filesToProcess } = pairSeVariants(afterCompanion);
   const hasMedia = filesToProcess.some((f) => !isSubtitleFile(f) && !companionOf.has(f));
   const allSubtitles = filesToProcess.every((f) => isSubtitleFile(f) || companionOf.has(f));
 
@@ -2320,14 +2355,16 @@ async function run() {
     // "4-1 방과후"와 "4-2 방과후"는 항상 같은 번역을 받는다.
     if (!skipTranslate && els.renameKorean.checked) {
       setStatus(T.translatingFilename);
-      // extraFiles(이미지 등 내용은 처리 안 하는 파일)도 이름만은 같은 요청에 끼워 번역한다
-      // (요청 횟수를 늘리지 않기 위해 — filesToProcess와 한 번에 모아 보낸다).
-      const namedFiles = [...filesToProcess, ...extraFiles];
+      // extraFiles(이미지 등 내용은 처리 안 하는 파일)와 primaryOf의 부차 판(효과음 있음 등)도
+      // 이름만은 같은 요청에 끼워 번역한다(요청 횟수를 늘리지 않기 위해 — 어차피 부차 판은
+      // suffix를 떼고 나면 primary와 제목(body)이 같아서 중복 제거되어 실제 항목이 늘지 않는다).
+      const namedFiles = [...filesToProcess, ...extraFiles, ...primaryOf.keys()];
       const baseNames = namedFiles.map((f) => f.name.replace(/\.[^.]+$/, ''));
       const relDirs = [...new Set(namedFiles.map((f) => relDirOf(f)).filter(Boolean))];
       ({ files: translatedNames, folders: translatedFolders } = await translateNamesAndFolders(baseNames, relDirs));
     }
 
+    const fileToResult = new Map();
     for (const [i, file] of filesToProcess.entries()) {
       checkCancelled();
       currentFileLabel = filesToProcess.length > 1 ? `[${i + 1}/${filesToProcess.length}] ${file.name}` : file.name;
@@ -2335,19 +2372,45 @@ async function run() {
       try {
         const result = await processOne(file, companionOf.get(file));
         allResults.push(result);
+        fileToResult.set(file, result);
       } catch (err) {
         // 취소, 키 오류, Groq 한도 소진은 전체 중단 — 그 외에는 이 파일만 실패 처리하고 계속
         if (cancelled || isFatalApiError(err) || err instanceof GroqQuotaError) throw err;
         console.error(err);
-        allResults.push({
+        const errResult = {
           fileName: file.name,
           baseName: file.name.replace(/\.[^.]+$/, ''),
           translatedName: file.name.replace(/\.[^.]+$/, ''),
           originalSrt: '', translatedSrt: '',
           blockCount: 0, removed: 0, refined: 0, failed: 0,
           error: err instanceof Error ? err.message : String(err),
-        });
+        };
+        allResults.push(errResult);
+        fileToResult.set(file, errResult);
       }
+    }
+
+    // 효과음 있음 등 부차 판은 효과음 없는 판(primary)을 실제로 처리한 결과를 그대로 재사용한다 —
+    // 대사는 같고 효과음만 다르므로 같은 자막을 새 파일명으로만 다시 붙여 내보낸다.
+    for (const [secondary, primary] of primaryOf) {
+      const base = fileToResult.get(primary);
+      if (!base || base.error) continue;
+      const baseName = secondary.name.replace(/\.[^.]+$/, '');
+      const secResult = {
+        ...base,
+        fileName: secondary.name,
+        baseName,
+        translatedName: baseName,
+        relDir: translateRelDir(relDirOf(secondary), translatedFolders),
+        origRelDir: relDirOf(secondary),
+      };
+      delete secResult.renameFailed;
+      if (!skipTranslate && els.renameKorean.checked) {
+        const translatedName = translatedNames.get(baseName);
+        if (translatedName) secResult.translatedName = translatedName;
+        else secResult.renameFailed = true;
+      }
+      allResults.push(secResult);
     }
   } catch (err) {
     console.error(err);
@@ -2363,7 +2426,7 @@ async function run() {
   const okResults = allResults.filter((r) => !r.error);
   if (allResults.length > 0) {
     for (const r of allResults) renderResultRow(r);
-    els.resultStats.textContent = T.batchDone(okResults.length, filesToProcess.length);
+    els.resultStats.textContent = T.batchDone(okResults.length, filesToProcess.length + primaryOf.size);
     els.downloadAllBtn.classList.toggle('hidden', okResults.length < 2);
 
     // 이름이 실제로 바뀐 파일이 있으면 원본 미디어까지 한 번에 바꿔주는 .bat 을 제공한다.
