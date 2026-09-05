@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-05.3';
+const APP_VERSION = '2026-09-05.4';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -900,7 +900,9 @@ function buildBatchPrompt(items, opts) {
     '- If a name is clearly invented or a play on words, translate what it means rather than spelling out its sound. A sound-only rendering leaves the reader with a string they cannot parse. When unsure whether a name is real, transliterate.',
     '- Ordinary words, slang, and abbreviations are not names. Translate them normally; the invented-name rule does not apply to them.',
     opts.styleGuide ? `- Style guide: ${opts.styleGuide}` : '',
-    glossaryLines ? `- Glossary:\n${glossaryLines}` : '',
+    glossaryLines
+      ? `- Glossary (source term -> required translation). A glossary key may be written as a phonetic reading instead of the term's exact original spelling — if a key does not literally appear in the source text but sounds like a term in it, treat it as that term anyway:\n${glossaryLines}`
+      : '',
     contextLines ? `\n${contextLines}` : '',
     '',
     'Input blocks as JSON:',
@@ -1607,7 +1609,9 @@ function buildFileNamePrompt(items, opts) {
     '- That consistency applies only to text that is identical in the source. Never reuse a translation from one title for a different source expression, however similar the two may look or sound.',
     '- If two inputs differ only by numbering, their translations must be identical apart from that numbering.',
     opts.styleGuide ? `- Style guide: ${opts.styleGuide}` : '',
-    opts.glossary ? `- Glossary:\n${Object.entries(opts.glossary).map(([k, v]) => `- ${k} -> ${v}`).join('\n')}` : '',
+    opts.glossary
+      ? `- Glossary (source term -> required translation). A glossary key may be written as a phonetic reading instead of the term's exact original spelling — if a key does not literally appear in the source text but sounds like a term in it, treat it as that term anyway:\n${Object.entries(opts.glossary).map(([k, v]) => `- ${k} -> ${v}`).join('\n')}`
+      : '',
     '',
     'Input titles as JSON:',
     JSON.stringify(items),
