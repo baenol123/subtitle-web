@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-06.2';
+const APP_VERSION = '2026-09-06.3';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -90,6 +90,7 @@ const STRINGS = {
     speechmaticsError: (s, b) => `Speechmatics API 오류 (${s}): ${b}`,
     speechmaticsRejected: (id) => `Speechmatics 작업이 거부됐습니다 (job ${id}).`,
     speechmaticsWaiting: (s) => `Speechmatics 처리 대기 중... ${s}초 경과 (배치 작업이라 시간이 걸립니다)`,
+    requestTimeout: (s) => `응답이 ${s}초 안에 오지 않아 요청을 중단했습니다.`,
     noTranslationInResponse: '응답에 번역이 없습니다.',
     translating: (done, total) => `번역 중... ${done}/${total} 블록`,
     refining: (done, total) => `AI 교정 중... ${done}/${total} 블록`,
@@ -181,6 +182,7 @@ const STRINGS = {
     speechmaticsError: (s, b) => `Speechmatics API error (${s}): ${b}`,
     speechmaticsRejected: (id) => `The Speechmatics job was rejected (job ${id}).`,
     speechmaticsWaiting: (s) => `Waiting on Speechmatics... ${s}s elapsed (batch jobs take a while)`,
+    requestTimeout: (s) => `No response within ${s}s — the request was aborted.`,
     noTranslationInResponse: 'No translation in the response.',
     translating: (done, total) => `Translating... ${done}/${total} blocks`,
     refining: (done, total) => `Proofreading... ${done}/${total} blocks`,
@@ -491,6 +493,29 @@ function sleep(ms) {
   });
 }
 
+// 요청이 비정상적으로 오래 걸려 멈춘 것처럼 보이는 경우(응답이 아예 안 오는 경우)를
+// 일정 시간 뒤 강제로 중단시켜, translateBatchWithSplit의 재시도/분할 로직이 대신
+// 처리하게 한다. 사용자가 취소 버튼을 눌렀을 때의 중단(abortController.signal)과는
+// 별개의 타임아웃이라 AbortSignal.any로 둘 다 감시한다.
+// 실사용에서 특정 배치가 응답 없이 몇 분씩 멈추는 문제가 실제로 보고돼 추가함.
+const FETCH_TIMEOUT_MS = 90000;
+async function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
+  const timeoutController = new AbortController();
+  const timer = setTimeout(() => timeoutController.abort(), timeoutMs);
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, timeoutController.signal])
+    : timeoutController.signal;
+  try {
+    return await fetch(url, { ...options, signal });
+  } catch (err) {
+    checkCancelled(); // 진짜 사용자 취소였다면 여기서 그 사유로 다시 던진다
+    if (err?.name === 'AbortError') throw new Error(T.requestTimeout(Math.round(timeoutMs / 1000)));
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // 파일 선택 (여러 개 지원)
 // ─────────────────────────────────────────────────────────────
@@ -754,12 +779,12 @@ async function transcribeChunk(blob, offset, chunkIndex, chunkTotal) {
     form.append('temperature', '0');
     if (language) form.append('language', language);
 
-    const res = await fetch(GROQ_URL, {
+    const res = await fetchWithTimeout(GROQ_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}` },
       body: form,
       signal: abortController.signal,
-    });
+    }, 300000);
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -819,12 +844,13 @@ async function transcribeChunkOpenAi(blob, offset) {
     form.append('response_format', 'diarized_json');
     if (language) form.append('language', language);
 
-    const res = await fetch(OPENAI_AUDIO_URL, {
+    // 오디오 처리라 텍스트 요청보다 훨씬 오래 걸릴 수 있어 타임아웃을 넉넉히 잡는다.
+    const res = await fetchWithTimeout(OPENAI_AUDIO_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}` },
       body: form,
       signal: abortController.signal,
-    });
+    }, 300000);
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -917,12 +943,12 @@ async function transcribeChunkElevenLabs(blob, offset) {
     form.append('timestamps_granularity', 'word');
     if (language) form.append('language_code', language);
 
-    const res = await fetch(ELEVENLABS_URL, {
+    const res = await fetchWithTimeout(ELEVENLABS_URL, {
       method: 'POST',
       headers: { 'xi-api-key': key },
       body: form,
       signal: abortController.signal,
-    });
+    }, 300000);
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -1018,12 +1044,12 @@ async function transcribeChunkSpeechmatics(blob, offset) {
   form.append('data_file', blob, 'chunk.mp3');
   form.append('config', config);
 
-  const submitRes = await fetch(SPEECHMATICS_URL, {
+  const submitRes = await fetchWithTimeout(SPEECHMATICS_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}` },
     body: form,
     signal: abortController.signal,
-  });
+  }, 300000);
   if (!submitRes.ok) {
     const body = await submitRes.text().catch(() => '');
     const message = T.speechmaticsError(submitRes.status, body.slice(0, 300));
@@ -1037,7 +1063,7 @@ async function transcribeChunkSpeechmatics(blob, offset) {
     checkCancelled();
     await sleep(2000);
     waitedSec += 2;
-    const statusRes = await fetch(`${SPEECHMATICS_URL}${id}`, {
+    const statusRes = await fetchWithTimeout(`${SPEECHMATICS_URL}${id}`, {
       headers: { Authorization: `Bearer ${key}` },
       signal: abortController.signal,
     });
@@ -1051,7 +1077,7 @@ async function transcribeChunkSpeechmatics(blob, offset) {
     if (waitedSec % 10 === 0) setStatus(T.speechmaticsWaiting(waitedSec));
   }
 
-  const transcriptRes = await fetch(`${SPEECHMATICS_URL}${id}/transcript?format=json-v2`, {
+  const transcriptRes = await fetchWithTimeout(`${SPEECHMATICS_URL}${id}/transcript?format=json-v2`, {
     headers: { Authorization: `Bearer ${key}` },
     signal: abortController.signal,
   });
@@ -1462,7 +1488,8 @@ async function callGemini(prompt) {
     if (thinking) generationConfig.thinkingConfig = thinking;
     const sendSafety = !rejects('safety', model);
 
-    const res = await fetch(
+    // Gemini는 파일 전체를 한 번에 보내는 경우가 많아 다른 곳보다 응답이 오래 걸릴 수 있다.
+    const res = await fetchWithTimeout(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
       {
         method: 'POST',
@@ -1473,7 +1500,8 @@ async function callGemini(prompt) {
           ...(sendSafety ? { safetySettings: GEMINI_SAFETY_OFF } : {}),
         }),
         signal: abortController.signal,
-      }
+      },
+      300000
     );
 
     if (!res.ok) {
@@ -1572,7 +1600,7 @@ async function callOpenAi(prompt) {
     // 조용히 요금을 물릴 뿐이라, 새는 것보다 멈추고 알리는 편이 낫다.
     if (!rejects('thinking', model)) body.reasoning_effort = 'none';
 
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify(body),
