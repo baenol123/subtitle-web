@@ -15,13 +15,16 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-05.7';
+const APP_VERSION = '2026-09-06.1';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const GROQ_MODEL = 'whisper-large-v3-turbo';
 const OPENAI_AUDIO_URL = 'https://api.openai.com/v1/audio/transcriptions';
 const ELEVENLABS_URL = 'https://api.elevenlabs.io/v1/speech-to-text';
+// Melia-1은 EU1/US1 리전에만 있다 — EU2로 실측 시도했을 때 401이 났음(이 계정 키는
+// EU2에 프로비저닝돼 있지 않았음), EU1로 정상 동작 확인.
+const SPEECHMATICS_URL = 'https://eu1.asr.api.speechmatics.com/v2/jobs/';
 
 const CHUNK_SECONDS = 600;      // 10분 단위로 잘라 전송 (Groq 파일 크기 제한 대응)
 const BATCH_SIZE = 20;          // 번역 배치 크기 (Claude)
@@ -83,6 +86,10 @@ const STRINGS = {
     needElevenlabsKey: 'ElevenLabs Scribe 모델을 선택했습니다 — ElevenLabs API 키가 필요합니다.',
     elevenlabsRateWait: (w) => `ElevenLabs 사용량 제한 — ${w}초 대기 후 재시도`,
     elevenlabsError: (s, b) => `ElevenLabs API 오류 (${s}): ${b}`,
+    needSpeechmaticsKey: 'Speechmatics Melia-1 모델을 선택했습니다 — Speechmatics API 키가 필요합니다.',
+    speechmaticsError: (s, b) => `Speechmatics API 오류 (${s}): ${b}`,
+    speechmaticsRejected: (id) => `Speechmatics 작업이 거부됐습니다 (job ${id}).`,
+    speechmaticsWaiting: (s) => `Speechmatics 처리 대기 중... ${s}초 경과 (배치 작업이라 시간이 걸립니다)`,
     noTranslationInResponse: '응답에 번역이 없습니다.',
     translating: (done, total) => `번역 중... ${done}/${total} 블록`,
     refining: (done, total) => `AI 교정 중... ${done}/${total} 블록`,
@@ -170,6 +177,10 @@ const STRINGS = {
     needElevenlabsKey: 'An ElevenLabs Scribe model is selected — an ElevenLabs API key is required.',
     elevenlabsRateWait: (w) => `ElevenLabs rate limit — retrying in ${w}s`,
     elevenlabsError: (s, b) => `ElevenLabs API error (${s}): ${b}`,
+    needSpeechmaticsKey: 'A Speechmatics Melia-1 model is selected — a Speechmatics API key is required.',
+    speechmaticsError: (s, b) => `Speechmatics API error (${s}): ${b}`,
+    speechmaticsRejected: (id) => `The Speechmatics job was rejected (job ${id}).`,
+    speechmaticsWaiting: (s) => `Waiting on Speechmatics... ${s}s elapsed (batch jobs take a while)`,
     noTranslationInResponse: 'No translation in the response.',
     translating: (done, total) => `Translating... ${done}/${total} blocks`,
     refining: (done, total) => `Proofreading... ${done}/${total} blocks`,
@@ -319,7 +330,7 @@ const els = {
   groqKey: $('groqKey'), groqKey2: $('groqKey2'), groqKey3: $('groqKey3'),
   anthropicKey: $('anthropicKey'), geminiKey: $('geminiKey'),
   geminiKey2: $('geminiKey2'), geminiKey3: $('geminiKey3'), openaiKey: $('openaiKey'),
-  elevenlabsKey: $('elevenlabsKey'),
+  elevenlabsKey: $('elevenlabsKey'), speechmaticsKey: $('speechmaticsKey'),
   sourceLang: $('sourceLang'), targetLang: $('targetLang'), model: $('model'),
   whisperModel: $('whisperModel'),
   skipTranslate: $('skipTranslate'), renameKorean: $('renameKorean'), aiRefine: $('aiRefine'),
@@ -368,7 +379,7 @@ function populateLanguageSelects() {
 populateLanguageSelects();
 
 // 설정 localStorage 저장/복원 (드롭다운을 채운 뒤에 복원해야 저장값이 적용됨)
-const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'openaiKey', 'elevenlabsKey', 'sourceLang', 'targetLang', 'model', 'whisperModel', 'styleGuide', 'glossary', 'corrections'];
+const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'openaiKey', 'elevenlabsKey', 'speechmaticsKey', 'sourceLang', 'targetLang', 'model', 'whisperModel', 'styleGuide', 'glossary', 'corrections'];
 for (const key of PERSIST) {
   if (!els[key]) continue; // 캐시된 옛 HTML에 아직 없는 입력칸은 건너뛴다
   const saved = localStorage.getItem(`subweb-${key}`);
@@ -910,6 +921,127 @@ async function transcribeChunkElevenLabs(blob, offset) {
   }
 }
 
+// 음성 인식 모델로 Speechmatics Melia-1을 골랐는지
+function isSpeechmaticsModel() {
+  return (els.whisperModel ? els.whisperModel.value : '') === 'melia-1';
+}
+
+// 일본어/중국어/태국어는 단어 사이에 공백을 넣지 않는다 — Speechmatics는 단어를
+// 하나씩 쪼개서 주므로, 이 언어들은 공백 없이 그대로 이어 붙여야 한다.
+const SM_NO_SPACE_LANGS = new Set(['ja', 'zh', 'th']);
+const SM_MAX_GAP = 0.8;
+const SM_MAX_DURATION = 7;
+
+// Speechmatics는 단어(word)/구두점(punctuation) 단위로 결과를 준다. 구두점 항목에는
+// "이 문장이 여기서 끝난다"는 is_eos 플래그가 명시적으로 붙어 있어서(실제 호출로 확인),
+// ElevenLabs 쪽처럼 정규식으로 문장 끝을 추측할 필요 없이 그 플래그로 바로 끊는다.
+// 그 외에 화자가 바뀌거나 공백이 너무 길거나 한 줄이 너무 길어지면도 끊는다.
+function groupSpeechmaticsResults(results, offset) {
+  const speakerLabels = new Map();
+  const labelFor = (id) => {
+    if (!id) return undefined;
+    if (!speakerLabels.has(id)) speakerLabels.set(id, String.fromCharCode(65 + speakerLabels.size));
+    return speakerLabels.get(id);
+  };
+
+  const blocks = [];
+  let cur = null;
+  for (const r of results) {
+    const alt = r.alternatives?.[0];
+    if (!alt) continue;
+    const speaker = labelFor(alt.speaker);
+
+    if (r.type === 'word') {
+      const gap = cur ? r.start_time - cur.lastEnd : 0;
+      const speakerChanged = cur && cur.speaker && speaker && cur.speaker !== speaker;
+      const shouldBreak = cur && (speakerChanged || gap > SM_MAX_GAP || (r.end_time - cur.start) > SM_MAX_DURATION);
+      if (shouldBreak) { blocks.push(cur); cur = null; }
+      if (!cur) {
+        cur = { start: r.start_time, end: r.end_time, text: '', speaker, lastEnd: r.end_time };
+      } else if (!SM_NO_SPACE_LANGS.has(alt.language)) {
+        cur.text += ' ';
+      }
+      cur.text += alt.content;
+      cur.end = r.end_time;
+      cur.lastEnd = r.end_time;
+    } else if (r.type === 'punctuation' && cur) {
+      cur.text += alt.content;
+      cur.end = r.end_time;
+      cur.lastEnd = r.end_time;
+      if (r.is_eos) { blocks.push(cur); cur = null; }
+    }
+  }
+  if (cur && cur.text.trim()) blocks.push(cur);
+
+  return blocks.map((b) => ({
+    start: offset + b.start,
+    end: offset + b.end,
+    text: b.text.trim(),
+    speaker: b.speaker,
+  }));
+}
+
+// Speechmatics는 즉시 응답하는 동기 API가 아니라 "작업 제출 → 상태 폴링 → 완료되면
+// 결과 조회"의 배치 잡 방식이다(실제 호출로 확인). config는 문서와 달리 파일 첨부가
+// 아니라 순수 JSON 문자열로 보내야 받아들여진다("config in formData is required"로
+// 거부되는 걸 실측으로 확인 후 수정).
+async function transcribeChunkSpeechmatics(blob, offset) {
+  const key = els.speechmaticsKey.value.trim();
+  const language = els.sourceLang.value || 'multi';
+
+  const config = JSON.stringify({
+    type: 'transcription',
+    transcription_config: { language, operating_point: 'melia-1', diarization: 'speaker' },
+  });
+  const form = new FormData();
+  form.append('data_file', blob, 'chunk.mp3');
+  form.append('config', config);
+
+  const submitRes = await fetch(SPEECHMATICS_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}` },
+    body: form,
+    signal: abortController.signal,
+  });
+  if (!submitRes.ok) {
+    const body = await submitRes.text().catch(() => '');
+    const message = T.speechmaticsError(submitRes.status, body.slice(0, 300));
+    if ([400, 401, 403, 404].includes(submitRes.status)) throw new SpeechmaticsFatalError(message);
+    throw new Error(message);
+  }
+  const { id } = await submitRes.json();
+
+  let waitedSec = 0;
+  for (;;) {
+    checkCancelled();
+    await sleep(2000);
+    waitedSec += 2;
+    const statusRes = await fetch(`${SPEECHMATICS_URL}${id}`, {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: abortController.signal,
+    });
+    if (!statusRes.ok) {
+      const body = await statusRes.text().catch(() => '');
+      throw new Error(T.speechmaticsError(statusRes.status, body.slice(0, 300)));
+    }
+    const { job } = await statusRes.json();
+    if (job.status === 'done') break;
+    if (job.status === 'rejected') throw new SpeechmaticsFatalError(T.speechmaticsRejected(id));
+    if (waitedSec % 10 === 0) setStatus(T.speechmaticsWaiting(waitedSec));
+  }
+
+  const transcriptRes = await fetch(`${SPEECHMATICS_URL}${id}/transcript?format=json-v2`, {
+    headers: { Authorization: `Bearer ${key}` },
+    signal: abortController.signal,
+  });
+  if (!transcriptRes.ok) {
+    const body = await transcriptRes.text().catch(() => '');
+    throw new Error(T.speechmaticsError(transcriptRes.status, body.slice(0, 300)));
+  }
+  const transcript = await transcriptRes.json();
+  return groupSpeechmaticsResults(transcript.results ?? [], offset);
+}
+
 // ─────────────────────────────────────────────────────────────
 // 3단계: 환각 필터
 // ─────────────────────────────────────────────────────────────
@@ -1157,6 +1289,9 @@ class OpenAiFatalError extends Error {}
 // ElevenLabs 키/모델 오류 — 재시도 무의미, 즉시 전체 중단용
 class ElevenLabsFatalError extends Error {}
 
+// Speechmatics 키/모델/잡 오류 — 재시도 무의미, 즉시 전체 중단용
+class SpeechmaticsFatalError extends Error {}
+
 // Gemini가 빈 응답을 준 이유 중 안전 필터에 해당하는 값들
 const REFUSAL_REASONS = /SAFETY|PROHIBITED|BLOCKLIST|RECITATION|IMAGE_SAFETY/i;
 
@@ -1173,6 +1308,7 @@ function isFatalApiError(err) {
     err instanceof AnthropicFatalError ||
     err instanceof OpenAiFatalError ||
     err instanceof ElevenLabsFatalError ||
+    err instanceof SpeechmaticsFatalError ||
     err instanceof Anthropic.AuthenticationError ||
     err instanceof Anthropic.PermissionDeniedError ||
     err instanceof Anthropic.NotFoundError
@@ -2469,12 +2605,14 @@ async function processOne(file, companionSrt = null) {
     const segments = [];
     const useOpenAiStt = isOpenAiWhisperModel();
     const useElevenLabsStt = isElevenLabsModel();
+    const useSpeechmaticsStt = isSpeechmaticsModel();
     for (const [i, chunk] of chunks.entries()) {
       setStatus(T.chunkProgress(i + 1, chunks.length));
       setProgress(i / chunks.length);
       segments.push(...await (
         useOpenAiStt ? transcribeChunkOpenAi(chunk.blob, chunk.offset) :
         useElevenLabsStt ? transcribeChunkElevenLabs(chunk.blob, chunk.offset) :
+        useSpeechmaticsStt ? transcribeChunkSpeechmatics(chunk.blob, chunk.offset) :
         transcribeChunk(chunk.blob, chunk.offset, i + 1, chunks.length)
       ));
     }
@@ -2609,6 +2747,11 @@ async function run() {
     } else if (isElevenLabsModel()) {
       if (!els.elevenlabsKey.value.trim()) {
         showError(T.needElevenlabsKey);
+        return;
+      }
+    } else if (isSpeechmaticsModel()) {
+      if (!els.speechmaticsKey.value.trim()) {
+        showError(T.needSpeechmaticsKey);
         return;
       }
     } else if (groqKeys().length === 0) {

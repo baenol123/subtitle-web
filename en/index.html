@@ -88,6 +88,10 @@
           ElevenLabs API key <span class="meta">— for speech-to-text (Scribe models) · <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noreferrer noopener">elevenlabs.io</a> (has a free tier)</span>
           <input type="password" id="elevenlabsKey" placeholder="sk_..." autocomplete="off" spellcheck="false" />
         </label>
+        <label>
+          Speechmatics API key <span class="meta">— for speech-to-text (Melia-1 model) · <a href="https://portal.speechmatics.com" target="_blank" rel="noreferrer noopener">portal.speechmatics.com</a> (10 free hours/month, requires a card)</span>
+          <input type="password" id="speechmaticsKey" placeholder="API key" autocomplete="off" spellcheck="false" />
+        </label>
       </div>
       <details>
         <summary>Backup Groq keys (optional) — used automatically when the free-tier limit is hit. Limits are per account, so backup keys must come from different Groq accounts.</summary>
@@ -140,6 +144,9 @@
             </optgroup>
             <optgroup label="ElevenLabs key · has a free tier">
               <option value="scribe_v2">ElevenLabs Scribe v2 — speaker labels · multilingual accuracy</option>
+            </optgroup>
+            <optgroup label="Speechmatics key · 10 free hours/month">
+              <option value="melia-1">Speechmatics Melia-1 — multilingual · speaker labels (slower, batch job)</option>
             </optgroup>
           </select>
         </label>

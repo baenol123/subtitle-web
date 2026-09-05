@@ -97,6 +97,10 @@
           ElevenLabs API 키 <span class="meta">— 음성 인식용(Scribe 모델 선택 시) · <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noreferrer noopener">elevenlabs.io</a> (무료 티어 있음)</span>
           <input type="password" id="elevenlabsKey" placeholder="sk_..." autocomplete="off" spellcheck="false" />
         </label>
+        <label>
+          Speechmatics API 키 <span class="meta">— 음성 인식용(Melia-1 모델 선택 시) · <a href="https://portal.speechmatics.com" target="_blank" rel="noreferrer noopener">portal.speechmatics.com</a> (매달 10시간 무료, 카드 등록 필요)</span>
+          <input type="password" id="speechmaticsKey" placeholder="API 키" autocomplete="off" spellcheck="false" />
+        </label>
       </div>
       <details>
         <summary>Groq 예비 키 (선택) — 무료 한도 초과 시 자동으로 전환됩니다. 한도는 계정 단위라 다른 계정에서 발급한 키여야 효과가 있습니다.</summary>
@@ -150,6 +154,9 @@
             </optgroup>
             <optgroup label="ElevenLabs 키 · 무료 티어 있음">
               <option value="scribe_v2">ElevenLabs Scribe v2 — 화자 분리·다국어 정확도</option>
+            </optgroup>
+            <optgroup label="Speechmatics 키 · 매달 10시간 무료">
+              <option value="melia-1">Speechmatics Melia-1 — 다국어·화자 분리 (처리에 시간 걸림)</option>
             </optgroup>
           </select>
         </label>
