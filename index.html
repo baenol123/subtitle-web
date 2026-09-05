@@ -90,8 +90,12 @@
           <input type="password" id="anthropicKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
         </label>
         <label>
-          OpenAI API 키 <span class="meta">— 번역용(GPT 모델 선택 시) · <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer noopener">platform.openai.com</a> (유료)</span>
+          OpenAI API 키 <span class="meta">— 번역·음성 인식용(GPT 모델 선택 시) · <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer noopener">platform.openai.com</a> (유료)</span>
           <input type="password" id="openaiKey" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+        </label>
+        <label>
+          ElevenLabs API 키 <span class="meta">— 음성 인식용(Scribe 모델 선택 시) · <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noreferrer noopener">elevenlabs.io</a> (무료 티어 있음)</span>
+          <input type="password" id="elevenlabsKey" placeholder="sk_..." autocomplete="off" spellcheck="false" />
         </label>
       </div>
       <details>
@@ -143,6 +147,9 @@
             </optgroup>
             <optgroup label="OpenAI 키 · 유료">
               <option value="gpt-4o-transcribe-diarize">GPT-4o Transcribe Diarize — 화자 분리(A/B/…)</option>
+            </optgroup>
+            <optgroup label="ElevenLabs 키 · 무료 티어 있음">
+              <option value="scribe_v2">ElevenLabs Scribe v2 — 화자 분리·다국어 정확도</option>
             </optgroup>
           </select>
         </label>

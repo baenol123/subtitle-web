@@ -15,12 +15,13 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-05.5';
+const APP_VERSION = '2026-09-05.6';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const GROQ_MODEL = 'whisper-large-v3-turbo';
 const OPENAI_AUDIO_URL = 'https://api.openai.com/v1/audio/transcriptions';
+const ELEVENLABS_URL = 'https://api.elevenlabs.io/v1/speech-to-text';
 
 const CHUNK_SECONDS = 600;      // 10분 단위로 잘라 전송 (Groq 파일 크기 제한 대응)
 const BATCH_SIZE = 20;          // 번역 배치 크기 (Claude)
@@ -79,6 +80,9 @@ const STRINGS = {
     openaiRateWait: (w) => `OpenAI 사용량 제한 — ${w}초 대기 후 재시도`,
     openaiError: (s, b) => `OpenAI API 오류 (${s}): ${b}`,
     openaiEmpty: 'OpenAI가 빈 응답을 반환했습니다.',
+    needElevenlabsKey: 'ElevenLabs Scribe 모델을 선택했습니다 — ElevenLabs API 키가 필요합니다.',
+    elevenlabsRateWait: (w) => `ElevenLabs 사용량 제한 — ${w}초 대기 후 재시도`,
+    elevenlabsError: (s, b) => `ElevenLabs API 오류 (${s}): ${b}`,
     noTranslationInResponse: '응답에 번역이 없습니다.',
     translating: (done, total) => `번역 중... ${done}/${total} 블록`,
     refining: (done, total) => `AI 교정 중... ${done}/${total} 블록`,
@@ -163,6 +167,9 @@ const STRINGS = {
     openaiRateWait: (w) => `OpenAI rate limit — retrying in ${w}s`,
     openaiError: (s, b) => `OpenAI API error (${s}): ${b}`,
     openaiEmpty: 'OpenAI returned an empty response.',
+    needElevenlabsKey: 'An ElevenLabs Scribe model is selected — an ElevenLabs API key is required.',
+    elevenlabsRateWait: (w) => `ElevenLabs rate limit — retrying in ${w}s`,
+    elevenlabsError: (s, b) => `ElevenLabs API error (${s}): ${b}`,
     noTranslationInResponse: 'No translation in the response.',
     translating: (done, total) => `Translating... ${done}/${total} blocks`,
     refining: (done, total) => `Proofreading... ${done}/${total} blocks`,
@@ -312,6 +319,7 @@ const els = {
   groqKey: $('groqKey'), groqKey2: $('groqKey2'), groqKey3: $('groqKey3'),
   anthropicKey: $('anthropicKey'), geminiKey: $('geminiKey'),
   geminiKey2: $('geminiKey2'), geminiKey3: $('geminiKey3'), openaiKey: $('openaiKey'),
+  elevenlabsKey: $('elevenlabsKey'),
   sourceLang: $('sourceLang'), targetLang: $('targetLang'), model: $('model'),
   whisperModel: $('whisperModel'),
   skipTranslate: $('skipTranslate'), renameKorean: $('renameKorean'), aiRefine: $('aiRefine'),
@@ -360,7 +368,7 @@ function populateLanguageSelects() {
 populateLanguageSelects();
 
 // 설정 localStorage 저장/복원 (드롭다운을 채운 뒤에 복원해야 저장값이 적용됨)
-const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'openaiKey', 'sourceLang', 'targetLang', 'model', 'whisperModel', 'styleGuide', 'glossary', 'corrections'];
+const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'openaiKey', 'elevenlabsKey', 'sourceLang', 'targetLang', 'model', 'whisperModel', 'styleGuide', 'glossary', 'corrections'];
 for (const key of PERSIST) {
   if (!els[key]) continue; // 캐시된 옛 HTML에 아직 없는 입력칸은 건너뛴다
   const saved = localStorage.getItem(`subweb-${key}`);
@@ -809,6 +817,99 @@ async function transcribeChunkOpenAi(blob, offset) {
   }
 }
 
+// 음성 인식 모델로 ElevenLabs Scribe를 골랐는지
+function isElevenLabsModel() {
+  return (els.whisperModel ? els.whisperModel.value : '').startsWith('scribe');
+}
+
+// ElevenLabs는 문장 단위가 아니라 "단어 단위" 타임스탬프로 온다(words: [{text, start,
+// end, type: 'word'|'spacing'|'audio_event', speaker_id}]) — 실제 호출로 확인함.
+// 자막 줄로 쓰려면 직접 묶어야 해서, 화자가 바뀌거나 문장이 끝나거나(.!?…) 공백이
+// 너무 길거나(MAX_GAP) 한 줄이 너무 길어지면(MAX_DURATION) 새 줄로 끊는다.
+// speaker_id는 "speaker_0" 식이라 OpenAI 쪽과 표기를 맞추려고 A, B, … 로 바꾼다.
+const EL_MAX_GAP = 0.8;
+const EL_MAX_DURATION = 7;
+const EL_SENTENCE_END_RE = /[.!?…。！？]\s*$/;
+
+function groupElevenLabsWords(words, offset) {
+  const speakerLabels = new Map();
+  const labelFor = (id) => {
+    if (!id) return undefined;
+    if (!speakerLabels.has(id)) speakerLabels.set(id, String.fromCharCode(65 + speakerLabels.size));
+    return speakerLabels.get(id);
+  };
+
+  const blocks = [];
+  let cur = null;
+  for (const w of words) {
+    if (w.type === 'audio_event') continue;
+    if (w.type === 'word') {
+      const speaker = labelFor(w.speaker_id);
+      const gap = cur ? w.start - cur.lastWordEnd : 0;
+      const speakerChanged = cur && cur.speaker && speaker && cur.speaker !== speaker;
+      const shouldBreak = cur && (
+        speakerChanged ||
+        gap > EL_MAX_GAP ||
+        (w.end - cur.start) > EL_MAX_DURATION ||
+        EL_SENTENCE_END_RE.test(cur.text)
+      );
+      if (shouldBreak) { blocks.push(cur); cur = null; }
+      if (!cur) cur = { start: w.start, end: w.end, text: '', speaker, lastWordEnd: w.end };
+      cur.text += w.text;
+      cur.end = w.end;
+      cur.lastWordEnd = w.end;
+    } else if (w.type === 'spacing' && cur) {
+      cur.text += w.text;
+    }
+  }
+  if (cur && cur.text.trim()) blocks.push(cur);
+
+  return blocks.map((b) => ({
+    start: offset + b.start,
+    end: offset + b.end,
+    text: b.text.trim(),
+    speaker: b.speaker,
+  }));
+}
+
+async function transcribeChunkElevenLabs(blob, offset) {
+  const key = els.elevenlabsKey.value.trim();
+  const language = els.sourceLang.value;
+
+  for (let attempt = 1; ; attempt++) {
+    checkCancelled();
+    const form = new FormData();
+    form.append('file', blob, 'chunk.mp3');
+    form.append('model_id', els.whisperModel.value);
+    form.append('diarize', 'true');
+    form.append('timestamps_granularity', 'word');
+    if (language) form.append('language_code', language);
+
+    const res = await fetch(ELEVENLABS_URL, {
+      method: 'POST',
+      headers: { 'xi-api-key': key },
+      body: form,
+      signal: abortController.signal,
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      if (res.status === 429 && attempt <= 3) {
+        const wait = 30;
+        setStatus(T.elevenlabsRateWait(wait));
+        await sleep(wait * 1000);
+        continue;
+      }
+      const message = T.elevenlabsError(res.status, body.slice(0, 300));
+      if ([400, 401, 403, 404].includes(res.status)) throw new ElevenLabsFatalError(message);
+      throw new Error(message);
+    }
+
+    const data = await res.json();
+    return groupElevenLabsWords(data.words ?? [], offset);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // 3단계: 환각 필터
 // ─────────────────────────────────────────────────────────────
@@ -1046,6 +1147,9 @@ class AnthropicFatalError extends Error {}
 // OpenAI 키/모델 오류 — 재시도 무의미, 즉시 전체 중단용
 class OpenAiFatalError extends Error {}
 
+// ElevenLabs 키/모델 오류 — 재시도 무의미, 즉시 전체 중단용
+class ElevenLabsFatalError extends Error {}
+
 // Gemini가 빈 응답을 준 이유 중 안전 필터에 해당하는 값들
 const REFUSAL_REASONS = /SAFETY|PROHIBITED|BLOCKLIST|RECITATION|IMAGE_SAFETY/i;
 
@@ -1061,6 +1165,7 @@ function isFatalApiError(err) {
     err instanceof ThinkingUnsupportedError ||
     err instanceof AnthropicFatalError ||
     err instanceof OpenAiFatalError ||
+    err instanceof ElevenLabsFatalError ||
     err instanceof Anthropic.AuthenticationError ||
     err instanceof Anthropic.PermissionDeniedError ||
     err instanceof Anthropic.NotFoundError
@@ -2356,12 +2461,15 @@ async function processOne(file, companionSrt = null) {
     setStep('stt', 'active');
     const segments = [];
     const useOpenAiStt = isOpenAiWhisperModel();
+    const useElevenLabsStt = isElevenLabsModel();
     for (const [i, chunk] of chunks.entries()) {
       setStatus(T.chunkProgress(i + 1, chunks.length));
       setProgress(i / chunks.length);
-      segments.push(...await (useOpenAiStt
-        ? transcribeChunkOpenAi(chunk.blob, chunk.offset)
-        : transcribeChunk(chunk.blob, chunk.offset, i + 1, chunks.length)));
+      segments.push(...await (
+        useOpenAiStt ? transcribeChunkOpenAi(chunk.blob, chunk.offset) :
+        useElevenLabsStt ? transcribeChunkElevenLabs(chunk.blob, chunk.offset) :
+        transcribeChunk(chunk.blob, chunk.offset, i + 1, chunks.length)
+      ));
     }
     setStep('stt', 'done', T.segmentsLabel(segments.length));
     checkCancelled();
@@ -2489,6 +2597,11 @@ async function run() {
     if (isOpenAiWhisperModel()) {
       if (!els.openaiKey.value.trim()) {
         showError(T.needOpenaiKey);
+        return;
+      }
+    } else if (isElevenLabsModel()) {
+      if (!els.elevenlabsKey.value.trim()) {
+        showError(T.needElevenlabsKey);
         return;
       }
     } else if (groqKeys().length === 0) {
