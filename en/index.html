@@ -217,10 +217,10 @@
       <h2 id="progress-h">Progress</h2>
       <ol class="steps" id="steps">
         <li data-step="audio">Audio extraction <span class="step-status"></span></li>
-        <li data-step="stt">Subtitle extraction (Whisper) <span class="step-status"></span></li>
+        <li data-step="stt">Subtitle extraction (<span class="step-engine" id="sttEngineLabel">Whisper</span>) <span class="step-status"></span></li>
         <li data-step="filter">Hallucination filter <span class="step-status"></span></li>
         <li data-step="refine">AI proofreading (optional) <span class="step-status"></span></li>
-        <li data-step="translate">Translation (Claude) <span class="step-status"></span></li>
+        <li data-step="translate">Translation (<span class="step-engine" id="translateEngineLabel">Claude</span>) <span class="step-status"></span></li>
       </ol>
       <div class="progress"><div id="progressBar"></div></div>
       <div id="statusLine" class="meta"></div>
