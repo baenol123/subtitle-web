@@ -127,8 +127,13 @@
         <label>
           Speech-to-text model
           <select id="whisperModel">
-            <option value="whisper-large-v3-turbo" selected>Whisper Large v3 Turbo — fast (default)</option>
-            <option value="whisper-large-v3">Whisper Large v3 — accuracy first (slower, uses more free quota)</option>
+            <optgroup label="Groq key · free">
+              <option value="whisper-large-v3-turbo" selected>Whisper Large v3 Turbo — fast (default)</option>
+              <option value="whisper-large-v3">Whisper Large v3 — accuracy first (slower, uses more free quota)</option>
+            </optgroup>
+            <optgroup label="OpenAI key · paid">
+              <option value="gpt-4o-transcribe-diarize">GPT-4o Transcribe Diarize — speaker labels (A/B/…)</option>
+            </optgroup>
           </select>
         </label>
         <label>

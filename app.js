@@ -15,11 +15,12 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-05.4';
+const APP_VERSION = '2026-09-05.5';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const GROQ_MODEL = 'whisper-large-v3-turbo';
+const OPENAI_AUDIO_URL = 'https://api.openai.com/v1/audio/transcriptions';
 
 const CHUNK_SECONDS = 600;      // 10분 단위로 잘라 전송 (Groq 파일 크기 제한 대응)
 const BATCH_SIZE = 20;          // 번역 배치 크기 (Claude)
@@ -758,6 +759,56 @@ async function transcribeChunk(blob, offset, chunkIndex, chunkTotal) {
   }
 }
 
+// 음성 인식 모델로 OpenAI(GPT-4o Transcribe Diarize 등)를 골랐는지
+function isOpenAiWhisperModel() {
+  return (els.whisperModel ? els.whisperModel.value : '').startsWith('gpt-4o');
+}
+
+// OpenAI Audio API — response_format: diarized_json 으로 요청하면 세그먼트마다
+// 화자 라벨(A, B, …)이 함께 온다. 실제 호출로 확인한 응답 형태:
+// { text, segments: [{ text, speaker, start, end, id }, ...] }
+async function transcribeChunkOpenAi(blob, offset) {
+  const key = els.openaiKey.value.trim();
+  const language = els.sourceLang.value;
+
+  for (let attempt = 1; ; attempt++) {
+    checkCancelled();
+    const form = new FormData();
+    form.append('file', blob, 'chunk.mp3');
+    form.append('model', els.whisperModel.value);
+    form.append('response_format', 'diarized_json');
+    if (language) form.append('language', language);
+
+    const res = await fetch(OPENAI_AUDIO_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+      signal: abortController.signal,
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      if (res.status === 429 && attempt <= 3) {
+        const wait = 30;
+        setStatus(T.openaiRateWait(wait));
+        await sleep(wait * 1000);
+        continue;
+      }
+      const message = T.openaiError(res.status, body.slice(0, 300));
+      if ([400, 401, 403, 404].includes(res.status)) throw new OpenAiFatalError(message);
+      throw new Error(message);
+    }
+
+    const data = await res.json();
+    return (data.segments ?? []).map((s) => ({
+      start: offset + s.start,
+      end: offset + s.end,
+      text: (s.text ?? '').trim(),
+      speaker: s.speaker,
+    }));
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // 3단계: 환각 필터
 // ─────────────────────────────────────────────────────────────
@@ -809,7 +860,9 @@ function buildSrt(blocks) {
 function segmentsToBlocks(segments) {
   return segments.map((s) => ({
     timestamp: `${srtTime(s.start)} --> ${srtTime(s.end)}`,
-    text: s.text,
+    // 화자 분리 모델(GPT-4o Transcribe Diarize)을 썼을 때만 s.speaker가 있다 —
+    // 앞에 "A: " 식으로 붙여서 원문·번역 자막 둘 다에 화자 구분이 남게 한다.
+    text: s.speaker ? `${s.speaker}: ${s.text}` : s.text,
   }));
 }
 
@@ -2302,10 +2355,13 @@ async function processOne(file, companionSrt = null) {
     // 2. Whisper 자막 추출
     setStep('stt', 'active');
     const segments = [];
+    const useOpenAiStt = isOpenAiWhisperModel();
     for (const [i, chunk] of chunks.entries()) {
       setStatus(T.chunkProgress(i + 1, chunks.length));
       setProgress(i / chunks.length);
-      segments.push(...await transcribeChunk(chunk.blob, chunk.offset, i + 1, chunks.length));
+      segments.push(...await (useOpenAiStt
+        ? transcribeChunkOpenAi(chunk.blob, chunk.offset)
+        : transcribeChunk(chunk.blob, chunk.offset, i + 1, chunks.length)));
     }
     setStep('stt', 'done', T.segmentsLabel(segments.length));
     checkCancelled();
@@ -2429,9 +2485,16 @@ async function run() {
   const hasMedia = filesToProcess.some((f) => !isSubtitleFile(f) && !companionOf.has(f));
   const allSubtitles = filesToProcess.every((f) => isSubtitleFile(f) || companionOf.has(f));
 
-  if (hasMedia && groqKeys().length === 0) {
-    showError(T.needGroqKey);
-    return;
+  if (hasMedia) {
+    if (isOpenAiWhisperModel()) {
+      if (!els.openaiKey.value.trim()) {
+        showError(T.needOpenaiKey);
+        return;
+      }
+    } else if (groqKeys().length === 0) {
+      showError(T.needGroqKey);
+      return;
+    }
   }
   const needsLlm = !skipTranslate || (hasMedia && els.aiRefine.checked);
   if (needsLlm) {
