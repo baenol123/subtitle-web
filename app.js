@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-05.6';
+const APP_VERSION = '2026-09-05.7';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -959,12 +959,19 @@ function buildSrt(blocks) {
 }
 
 function segmentsToBlocks(segments) {
-  return segments.map((s) => ({
-    timestamp: `${srtTime(s.start)} --> ${srtTime(s.end)}`,
-    // 화자 분리 모델(GPT-4o Transcribe Diarize)을 썼을 때만 s.speaker가 있다 —
-    // 앞에 "A: " 식으로 붙여서 원문·번역 자막 둘 다에 화자 구분이 남게 한다.
-    text: s.speaker ? `${s.speaker}: ${s.text}` : s.text,
-  }));
+  // 화자 분리 모델(GPT-4o Transcribe Diarize, ElevenLabs Scribe)을 썼을 때만 s.speaker가
+  // 있다 — A/B 라벨을 이름처럼 박아 넣는 대신, 바로 앞 줄과 화자가 다를 때만
+  // "- "를 붙인다(자막에서 흔히 쓰는 화자 전환 표시 방식). 같은 화자가 이어지면
+  // 아무것도 안 붙는다. s.speaker가 아예 없으면(Groq) 항상 원문 그대로.
+  let prevSpeaker;
+  return segments.map((s) => {
+    const speakerChanged = s.speaker !== undefined && s.speaker !== prevSpeaker;
+    if (s.speaker !== undefined) prevSpeaker = s.speaker;
+    return {
+      timestamp: `${srtTime(s.start)} --> ${srtTime(s.end)}`,
+      text: speakerChanged ? `- ${s.text}` : s.text,
+    };
+  });
 }
 
 // SRT는 hh:mm:ss,mmm 이지만 WebVTT는 1시간 미만이면 시(hour)를 생략한 mm:ss.mmm 이 표준이다.
