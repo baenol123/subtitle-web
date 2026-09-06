@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-06.7';
+const APP_VERSION = '2026-09-06.8';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -854,6 +854,8 @@ async function transcribeChunkOpenAi(blob, offset) {
     form.append('file', blob, chunkFileName(blob));
     form.append('model', els.whisperModel.value);
     form.append('response_format', 'diarized_json');
+    // diarize 모델은 30초 넘는 입력에 이 값이 없으면 거부한다(실제 호출로 확인).
+    form.append('chunking_strategy', 'auto');
     if (language) form.append('language', language);
 
     // 오디오 처리라 텍스트 요청보다 훨씬 오래 걸릴 수 있어 타임아웃을 넉넉히 잡는다.
