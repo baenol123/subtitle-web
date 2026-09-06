@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-06.5';
+const APP_VERSION = '2026-09-06.6';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -908,10 +908,13 @@ function groupElevenLabsWords(words, offset) {
       const speaker = labelFor(w.speaker_id);
       const gap = cur ? w.start - cur.lastWordEnd : 0;
       const speakerChanged = cur && cur.speaker && speaker && cur.speaker !== speaker;
+      // 최대 길이 제한은 gap > 0(실제 쉼)일 때만 적용한다 — gap이 정확히 0이면 두 토큰이
+      // 활용형 하나를 쪼갠 것일 가능성이 높아서("見せてる" → "見せて"+"る"), 길이 제한
+      // 때문에 그 사이를 끊으면 단어 중간이 잘려 보인다(실사용에서 확인된 문제).
       const shouldBreak = cur && (
         speakerChanged ||
         gap > EL_MAX_GAP ||
-        (w.end - cur.start) > EL_MAX_DURATION ||
+        (gap > 0 && (w.end - cur.start) > EL_MAX_DURATION) ||
         EL_SENTENCE_END_RE.test(cur.text)
       );
       if (shouldBreak) { blocks.push(cur); cur = null; }
