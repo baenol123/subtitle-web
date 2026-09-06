@@ -15,12 +15,11 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-06.8';
+const APP_VERSION = '2026-09-06.9';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const GROQ_MODEL = 'whisper-large-v3-turbo';
-const OPENAI_AUDIO_URL = 'https://api.openai.com/v1/audio/transcriptions';
 const ELEVENLABS_URL = 'https://api.elevenlabs.io/v1/speech-to-text';
 
 const CHUNK_SECONDS = 600;      // 10분 단위로 잘라 전송 (Groq 파일 크기 제한 대응)
@@ -406,7 +405,6 @@ if (els.model) {
 function updateEngineLabels() {
   if (els.sttEngineLabel) {
     els.sttEngineLabel.textContent =
-      isOpenAiWhisperModel() ? 'GPT-4o' :
       isElevenLabsModel() ? 'ElevenLabs' :
       'Whisper';
   }
@@ -516,6 +514,22 @@ async function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
   } finally {
     clearInterval(ticker);
     clearTimeout(timer);
+  }
+}
+
+// 번역 쪽(translateBatchWithSplit)은 실패 시 자동으로 재시도·분할하는데, 음성 인식
+// 쪽은 그런 안전망이 전혀 없어서 순간적인 네트워크 실패("Failed to fetch") 한 번에
+// 파일 전체가 실패 처리되는 게 실사용에서 확인됨. STT 청크 호출을 이 함수로 감싸서
+// 일시적 오류(키/모델 오류 등 재시도해도 소용없는 것 제외)는 몇 번 재시도하게 한다.
+async function withRetry(fn, retries = 2) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (cancelled || isFatalApiError(err) || attempt > retries) throw err;
+      console.warn(`일시적 오류로 재시도합니다 (${attempt}/${retries}):`, err instanceof Error ? err.message : err);
+      await sleep(2000 * attempt);
+    }
   }
 }
 
@@ -832,59 +846,6 @@ async function transcribeChunk(blob, offset, chunkIndex, chunkTotal) {
       start: offset + s.start,
       end: offset + s.end,
       text: (s.text ?? '').trim(),
-    }));
-  }
-}
-
-// 음성 인식 모델로 OpenAI(GPT-4o Transcribe Diarize 등)를 골랐는지
-function isOpenAiWhisperModel() {
-  return (els.whisperModel ? els.whisperModel.value : '').startsWith('gpt-4o');
-}
-
-// OpenAI Audio API — response_format: diarized_json 으로 요청하면 세그먼트마다
-// 화자 라벨(A, B, …)이 함께 온다. 실제 호출로 확인한 응답 형태:
-// { text, segments: [{ text, speaker, start, end, id }, ...] }
-async function transcribeChunkOpenAi(blob, offset) {
-  const key = els.openaiKey.value.trim();
-  const language = els.sourceLang.value;
-
-  for (let attempt = 1; ; attempt++) {
-    checkCancelled();
-    const form = new FormData();
-    form.append('file', blob, chunkFileName(blob));
-    form.append('model', els.whisperModel.value);
-    form.append('response_format', 'diarized_json');
-    // diarize 모델은 30초 넘는 입력에 이 값이 없으면 거부한다(실제 호출로 확인).
-    form.append('chunking_strategy', 'auto');
-    if (language) form.append('language', language);
-
-    // 오디오 처리라 텍스트 요청보다 훨씬 오래 걸릴 수 있어 타임아웃을 넉넉히 잡는다.
-    const res = await fetchWithTimeout(OPENAI_AUDIO_URL, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}` },
-      body: form,
-      signal: abortController.signal,
-    }, 300000);
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      if (res.status === 429 && attempt <= 3) {
-        const wait = 30;
-        setStatus(T.openaiRateWait(wait));
-        await sleep(wait * 1000);
-        continue;
-      }
-      const message = T.openaiError(res.status, body.slice(0, 300));
-      if ([400, 401, 403, 404].includes(res.status)) throw new OpenAiFatalError(message);
-      throw new Error(message);
-    }
-
-    const data = await res.json();
-    return (data.segments ?? []).map((s) => ({
-      start: offset + s.start,
-      end: offset + s.end,
-      text: (s.text ?? '').trim(),
-      speaker: s.speaker,
     }));
   }
 }
@@ -2544,16 +2505,14 @@ async function processOne(file, companionSrt = null) {
     // 2. Whisper 자막 추출
     setStep('stt', 'active');
     const segments = [];
-    const useOpenAiStt = isOpenAiWhisperModel();
     const useElevenLabsStt = isElevenLabsModel();
     for (const [i, chunk] of chunks.entries()) {
       setStatus(T.chunkProgress(i + 1, chunks.length));
       setProgress(i / chunks.length);
-      segments.push(...await (
-        useOpenAiStt ? transcribeChunkOpenAi(chunk.blob, chunk.offset) :
+      segments.push(...await withRetry(() => (
         useElevenLabsStt ? transcribeChunkElevenLabs(chunk.blob, chunk.offset) :
         transcribeChunk(chunk.blob, chunk.offset, i + 1, chunks.length)
-      ));
+      )));
     }
     setStep('stt', 'done', T.segmentsLabel(segments.length));
     checkCancelled();
@@ -2678,12 +2637,7 @@ async function run() {
   const allSubtitles = filesToProcess.every((f) => isSubtitleFile(f) || companionOf.has(f));
 
   if (hasMedia) {
-    if (isOpenAiWhisperModel()) {
-      if (!els.openaiKey.value.trim()) {
-        showError(T.needOpenaiKey);
-        return;
-      }
-    } else if (isElevenLabsModel()) {
+    if (isElevenLabsModel()) {
       if (!els.elevenlabsKey.value.trim()) {
         showError(T.needElevenlabsKey);
         return;
