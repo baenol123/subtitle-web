@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-06.6';
+const APP_VERSION = '2026-09-06.7';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -660,6 +660,15 @@ async function loadFFmpeg() {
   return ffmpeg;
 }
 
+// 작은 오디오 파일은 ffmpeg 없이 원본 그대로(chunk.blob = 원본 File) 보내는데, 이때
+// 파일명을 무조건 "chunk.mp3"로 박아 보내면 실제 내용(m4a/wav/flac 등)과 확장자가
+// 어긋나 STT API가 "corrupted or unsupported"로 거부한다(gpt-4o-transcribe에서
+// 실사용으로 확인). File 객체는 원래 이름이 있으니 그걸 쓰고, ffmpeg가 만든 순수
+// Blob(진짜 mp3)만 "chunk.mp3"로 부른다.
+function chunkFileName(blob) {
+  return blob instanceof File ? blob.name : 'chunk.mp3';
+}
+
 // 영상에서 오디오만 추출해 10분 단위 mp3 조각으로 반환
 async function extractAudioChunks(file) {
   const ext = fileExt(file.name);
@@ -776,7 +785,7 @@ async function transcribeChunk(blob, offset, chunkIndex, chunkTotal) {
     checkCancelled();
     const key = keys[groqKeyIndex % keys.length];
     const form = new FormData();
-    form.append('file', blob, 'chunk.mp3');
+    form.append('file', blob, chunkFileName(blob));
     form.append('model', els.whisperModel ? els.whisperModel.value : GROQ_MODEL);
     form.append('response_format', 'verbose_json');
     form.append('temperature', '0');
@@ -842,7 +851,7 @@ async function transcribeChunkOpenAi(blob, offset) {
   for (let attempt = 1; ; attempt++) {
     checkCancelled();
     const form = new FormData();
-    form.append('file', blob, 'chunk.mp3');
+    form.append('file', blob, chunkFileName(blob));
     form.append('model', els.whisperModel.value);
     form.append('response_format', 'diarized_json');
     if (language) form.append('language', language);
@@ -943,7 +952,7 @@ async function transcribeChunkElevenLabs(blob, offset) {
   for (let attempt = 1; ; attempt++) {
     checkCancelled();
     const form = new FormData();
-    form.append('file', blob, 'chunk.mp3');
+    form.append('file', blob, chunkFileName(blob));
     form.append('model_id', els.whisperModel.value);
     form.append('diarize', 'true');
     form.append('timestamps_granularity', 'word');
