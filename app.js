@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-06.3';
+const APP_VERSION = '2026-09-06.4';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -91,6 +91,7 @@ const STRINGS = {
     speechmaticsRejected: (id) => `Speechmatics 작업이 거부됐습니다 (job ${id}).`,
     speechmaticsWaiting: (s) => `Speechmatics 처리 대기 중... ${s}초 경과 (배치 작업이라 시간이 걸립니다)`,
     requestTimeout: (s) => `응답이 ${s}초 안에 오지 않아 요청을 중단했습니다.`,
+    stillWaiting: (s) => `응답 기다리는 중... ${s}초 경과 (정상적으로 느릴 수 있습니다)`,
     noTranslationInResponse: '응답에 번역이 없습니다.',
     translating: (done, total) => `번역 중... ${done}/${total} 블록`,
     refining: (done, total) => `AI 교정 중... ${done}/${total} 블록`,
@@ -183,6 +184,7 @@ const STRINGS = {
     speechmaticsRejected: (id) => `The Speechmatics job was rejected (job ${id}).`,
     speechmaticsWaiting: (s) => `Waiting on Speechmatics... ${s}s elapsed (batch jobs take a while)`,
     requestTimeout: (s) => `No response within ${s}s — the request was aborted.`,
+    stillWaiting: (s) => `Waiting for a response... ${s}s elapsed (this can be normal)`,
     noTranslationInResponse: 'No translation in the response.',
     translating: (done, total) => `Translating... ${done}/${total} blocks`,
     refining: (done, total) => `Proofreading... ${done}/${total} blocks`,
@@ -498,13 +500,25 @@ function sleep(ms) {
 // 처리하게 한다. 사용자가 취소 버튼을 눌렀을 때의 중단(abortController.signal)과는
 // 별개의 타임아웃이라 AbortSignal.any로 둘 다 감시한다.
 // 실사용에서 특정 배치가 응답 없이 몇 분씩 멈추는 문제가 실제로 보고돼 추가함.
-const FETCH_TIMEOUT_MS = 90000;
+//
+// ⚠ 너무 짧게 잡으면 역효과가 난다: 그냥 느릴 뿐인(진짜로 멈춘 게 아닌) 정상 요청을
+// 죽은 것으로 오판해 끊어버리면, 재시도/분할 때마다 프롬프트 전체(용어집·스타일
+// 가이드·문맥 줄 등 고정 오버헤드)를 다시 보내게 되어 같은 내용에 비용이 중복
+// 청구된다 — 실사용에서 이 오탐으로 API 비용이 비정상적으로 늘어난 사례가 확인됨.
+// 그래서 텍스트 요청도 넉넉하게 잡는다(기다리는 건 공짜지만, 오탐 재시도는 안 그렇다).
+const FETCH_TIMEOUT_MS = 240000;
 async function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
   const timeoutController = new AbortController();
   const timer = setTimeout(() => timeoutController.abort(), timeoutMs);
   const signal = options.signal
     ? AbortSignal.any([options.signal, timeoutController.signal])
     : timeoutController.signal;
+  // 응답이 오래 걸려도 "멈춘 것처럼" 보이지 않도록 대기 중임을 주기적으로 알려준다.
+  const startedAt = Date.now();
+  const ticker = setInterval(() => {
+    const elapsed = Math.round((Date.now() - startedAt) / 1000);
+    if (elapsed >= 20) setStatus(T.stillWaiting(elapsed));
+  }, 10000);
   try {
     return await fetch(url, { ...options, signal });
   } catch (err) {
@@ -512,6 +526,7 @@ async function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
     if (err?.name === 'AbortError') throw new Error(T.requestTimeout(Math.round(timeoutMs / 1000)));
     throw err;
   } finally {
+    clearInterval(ticker);
     clearTimeout(timer);
   }
 }
