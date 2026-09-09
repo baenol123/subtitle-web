@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-06.9';
+const APP_VERSION = '2026-09-10.1';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -2114,6 +2114,14 @@ function buildRenameBat(pairs, folderPairs = []) {
   // 텍스트로 읽어 그 부분만 잘라 디코드·실행한다 — 명령줄에는 파일 크기와 무관한
   // 짧고 고정된 스크립트만 올라가므로 길이 제한과 무관해진다.
   const psReader = [
+    // %~dp0(현재 폴더)를 cd로 옮겨서 PowerShell이 물려받게 하면, 폴더명에 대괄호
+    // "[ ]"나 괄호"( )"가 있을 때 자식 프로세스(powershell.exe)가 작업 폴더를 못
+    // 물려받고 powershell.exe 자기 설치 폴더(System32\WindowsPowerShell\v1.0)로
+    // 떨어지는 문제를 실측으로 확인함 — cmd 자체는 cd를 제대로 하는데(％CD％로 확인),
+    // 그 상태에서 새 프로세스를 띄우는 단계에서만 깨진다. 그래서 cd 대신 환경변수로
+    // 경로를 넘기고, PowerShell이 Set-Location으로 직접 이동하게 한다(이러면 대괄호·
+    // 괄호가 있어도 정상 동작함을 실측 확인).
+    `Set-Location -LiteralPath $env:BATDIR`,
     `$lines=Get-Content -LiteralPath '%~f0' -Encoding UTF8`,
     `$idx=[Array]::IndexOf($lines,'${BAT_PAYLOAD_MARK}')`,
     `if($idx -lt 0){Write-Host 'PAYLOAD marker not found.';exit 1}`,
@@ -2128,7 +2136,8 @@ function buildRenameBat(pairs, folderPairs = []) {
   return [
     '@echo off',
     // 순수 ASCII 메커니즘(%~dp0)만 쓰므로 cmd의 UTF-8 줄바꿈 버그와 무관하게 안전하다.
-    'cd /d "%~dp0"',
+    // cd 대신 환경변수로 넘기는 이유는 위 psReader 주석 참고.
+    'set "BATDIR=%~dp0"',
     `powershell -NoProfile -ExecutionPolicy Bypass -Command "${psReader}"`,
     'if errorlevel 1 pause',
     'goto :eof',
