@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-10.1';
+const APP_VERSION = '2026-09-10.2';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -614,7 +614,9 @@ function handleFiles(files, opts = {}) {
   // 미리보기 목록에도 실제 run()과 같은 짝짓기 결과를 반영한다 —
   // 그렇지 않으면 짝지어진 미디어도 "추출+번역"으로 표시돼 실제 동작과 어긋나 보인다.
   const { companionOf, filesToProcess: afterCompanionPreview } = pairCompanionSubtitles(selectedFiles);
-  const { primaryOf: primaryOfPreview } = pairSeVariants(afterCompanionPreview);
+  const { primaryOf: primaryOfFolderPreview, filesToProcess: afterFolderSePreview } = pairSeVariantsByFolder(afterCompanionPreview);
+  const { primaryOf: primaryOfSuffixPreview } = pairSeVariants(afterFolderSePreview);
+  const primaryOfPreview = new Map([...primaryOfFolderPreview, ...primaryOfSuffixPreview]);
   const consumedSubtitles = new Set(companionOf.values());
   const lines = [...selectedFiles, ...extraFiles].map((f) => {
     const kind = extraFiles.includes(f) ? T.nameOnlyKind
@@ -2637,11 +2639,42 @@ function pairSeVariants(files) {
   return { primaryOf, filesToProcess: files.filter((f) => !primaryOf.has(f)) };
 }
 
+// 효과음 유무가 파일명 접미사가 아니라 "폴더 자체"로 나뉜 경우 — 예: "02.音声/" 안에
+// 원본이 있고 그 안에 "水音SEなし"(효과음 없음) 하위 폴더가 따로 있는데, 그 안의
+// 파일명이 부모 폴더와 완전히 똑같은 패턴(실사용 폴더 구조에서 확인됨). 하위 폴더
+// 이름에 SE/효과음 + 없음 계열 단어가 같이 있고, 부모 폴더에 같은 파일명이 있으면
+// 그 하위 폴더 쪽(효과음 없음)을 primary로 삼아 부모 쪽(효과음 있음)이 재사용하게 한다.
+const NO_SE_FOLDER_RE = /(SE|効果音).{0,4}(less|なし|無し|カット|cut|off|オフ)/i;
+
+function pairSeVariantsByFolder(files) {
+  const byDirAndName = new Map(); // `dir::파일명` → File
+  for (const f of files) {
+    if (isSubtitleFile(f)) continue;
+    byDirAndName.set(`${relDirOf(f)}::${f.name}`, f);
+  }
+  const primaryOf = new Map(); // 부모 폴더(효과음 있음) File → 하위 폴더(효과음 없음) File
+  for (const f of files) {
+    if (isSubtitleFile(f)) continue;
+    const dir = relDirOf(f);
+    const segs = dir ? dir.split('/') : [];
+    const leaf = segs[segs.length - 1];
+    if (!leaf || !NO_SE_FOLDER_RE.test(leaf)) continue;
+    const parentDir = segs.slice(0, -1).join('/');
+    const counterpart = byDirAndName.get(`${parentDir}::${f.name}`);
+    if (counterpart && counterpart !== f) primaryOf.set(counterpart, f);
+  }
+  return { primaryOf, filesToProcess: files.filter((f) => !primaryOf.has(f)) };
+}
+
 async function run() {
   const skipTranslate = els.skipTranslate.checked;
   const { companionOf, filesToProcess: afterCompanion } = pairCompanionSubtitles(selectedFiles);
-  // 효과음 있음/없음만 다른 동일 대사 판은 효과음 없는 쪽 하나로만 STT를 돌린다.
-  const { primaryOf, filesToProcess } = pairSeVariants(afterCompanion);
+  // 효과음 있음/없음만 다른 동일 대사 판은 효과음 없는 쪽 하나로만 STT를 돌린다 —
+  // 폴더 자체로 나뉜 경우(예: "水音SEなし" 하위 폴더)와 파일명 접미사로 나뉜 경우
+  // 둘 다 감지해서 합친다.
+  const { primaryOf: primaryOfFolder, filesToProcess: afterFolderSe } = pairSeVariantsByFolder(afterCompanion);
+  const { primaryOf: primaryOfSuffix, filesToProcess } = pairSeVariants(afterFolderSe);
+  const primaryOf = new Map([...primaryOfFolder, ...primaryOfSuffix]);
   const hasMedia = filesToProcess.some((f) => !isSubtitleFile(f) && !companionOf.has(f));
   const allSubtitles = filesToProcess.every((f) => isSubtitleFile(f) || companionOf.has(f));
 
