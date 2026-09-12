@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-10.2';
+const APP_VERSION = '2026-09-13.1';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -865,6 +865,12 @@ function isElevenLabsModel() {
 const EL_MAX_GAP = 0.8;
 const EL_MAX_DURATION = 7;
 const EL_SENTENCE_END_RE = /[.!?…。！？]\s*$/;
+// ASMR 음성처럼 신음/숨소리 등 비언어음이 섞이면 ElevenLabs가 단어 타임스탬프를
+// 엉뚱하게 매기는 경우가 실측으로 확인됨(예: "魔女" 한 단어인데 "魔"와 "女" 사이에
+// 실제로는 없는 10초 공백을 끼워넣고, 뒤 블록은 21초짜리로 늘어남). 한자로 끝나는
+// 블록 뒤에 한자로 시작하는 단어가 오면(한자 합성어 중간일 가능성이 높음) gap이
+// 아무리 커도 끊지 않고 이어붙인다 — 타이밍이 부정확해도 텍스트가 잘리는 것보다 낫다.
+const CJK_RE = /[一-鿿㐀-䶿]/;
 
 function groupElevenLabsWords(words, offset) {
   const speakerLabels = new Map();
@@ -882,10 +888,13 @@ function groupElevenLabsWords(words, offset) {
       const speaker = labelFor(w.speaker_id);
       const gap = cur ? w.start - cur.lastWordEnd : 0;
       const speakerChanged = cur && cur.speaker && speaker && cur.speaker !== speaker;
+      const looksLikeMidWordCut = cur && !speakerChanged &&
+        !EL_SENTENCE_END_RE.test(cur.text) &&
+        CJK_RE.test(cur.text.slice(-1)) && CJK_RE.test(w.text.slice(0, 1));
       // 최대 길이 제한은 gap > 0(실제 쉼)일 때만 적용한다 — gap이 정확히 0이면 두 토큰이
       // 활용형 하나를 쪼갠 것일 가능성이 높아서("見せてる" → "見せて"+"る"), 길이 제한
       // 때문에 그 사이를 끊으면 단어 중간이 잘려 보인다(실사용에서 확인된 문제).
-      const shouldBreak = cur && (
+      const shouldBreak = cur && !looksLikeMidWordCut && (
         speakerChanged ||
         gap > EL_MAX_GAP ||
         (gap > 0 && (w.end - cur.start) > EL_MAX_DURATION) ||
