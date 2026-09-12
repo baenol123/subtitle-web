@@ -88,6 +88,10 @@
           ElevenLabs API key <span class="meta">— for speech-to-text (Scribe models) · <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noreferrer noopener">elevenlabs.io</a> (has a free tier)</span>
           <input type="password" id="elevenlabsKey" placeholder="sk_..." autocomplete="off" spellcheck="false" />
         </label>
+        <label>
+          xAI (Grok) API key <span class="meta">— for AI proofreading (Grok models) · <a href="https://console.x.ai" target="_blank" rel="noreferrer noopener">console.x.ai</a> (paid)</span>
+          <input type="password" id="grokKey" placeholder="xai-..." autocomplete="off" spellcheck="false" />
+        </label>
       </div>
       <details>
         <summary>Backup Groq keys (optional) — used automatically when the free-tier limit is hit. Limits are per account, so backup keys must come from different Groq accounts.</summary>
@@ -166,6 +170,16 @@
             <label><input type="checkbox" id="aiRefine" /> AI proofreading (fix mis-recognitions)</label>
           </span>
         </label>
+        <label>
+          AI proofreading model <span class="meta">(used only when "AI proofreading" above is checked)</span>
+          <select id="refineModel">
+            <option value="" selected>Same as translation model</option>
+            <optgroup label="Grok — xAI key · paid · looser content filtering">
+              <option value="grok-4.1-fast-non-reasoning">Grok 4.1 Fast (non-reasoning) — cheap &amp; fast (recommended)</option>
+              <option value="grok-4.1-fast-reasoning">Grok 4.1 Fast (reasoning) — more careful review</option>
+            </optgroup>
+          </select>
+        </label>
       </div>
       <details>
         <summary>Tone / Glossary / Corrections (optional)</summary>
@@ -209,7 +223,7 @@
         <li data-step="audio">Audio extraction <span class="step-status"></span></li>
         <li data-step="stt">Subtitle extraction (<span class="step-engine" id="sttEngineLabel">Whisper</span>) <span class="step-status"></span></li>
         <li data-step="filter">Hallucination filter <span class="step-status"></span></li>
-        <li data-step="refine">AI proofreading (optional) <span class="step-status"></span></li>
+        <li data-step="refine">AI proofreading (<span class="step-engine" id="refineEngineLabel">Claude</span>) <span class="step-status"></span></li>
         <li data-step="translate">Translation (<span class="step-engine" id="translateEngineLabel">Claude</span>) <span class="step-status"></span></li>
       </ol>
       <div class="progress"><div id="progressBar"></div></div>

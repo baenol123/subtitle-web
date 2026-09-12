@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-13.1';
+const APP_VERSION = '2026-09-13.2';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -82,6 +82,10 @@ const STRINGS = {
     needElevenlabsKey: 'ElevenLabs Scribe 모델을 선택했습니다 — ElevenLabs API 키가 필요합니다.',
     elevenlabsRateWait: (w) => `ElevenLabs 사용량 제한 — ${w}초 대기 후 재시도`,
     elevenlabsError: (s, b) => `ElevenLabs API 오류 (${s}): ${b}`,
+    needGrokKey: 'AI 교정 모델로 Grok을 선택했습니다 — xAI API 키가 필요합니다.',
+    grokRateWait: (w) => `Grok 사용량 제한 — ${w}초 대기 후 재시도`,
+    grokError: (s, b) => `Grok API 오류 (${s}): ${b}`,
+    grokEmpty: 'Grok이 빈 응답을 반환했습니다.',
     requestTimeout: (s) => `응답이 ${s}초 안에 오지 않아 요청을 중단했습니다.`,
     stillWaiting: (s) => `응답 기다리는 중... ${s}초 경과 (정상적으로 느릴 수 있습니다)`,
     noTranslationInResponse: '응답에 번역이 없습니다.',
@@ -171,6 +175,10 @@ const STRINGS = {
     needElevenlabsKey: 'An ElevenLabs Scribe model is selected — an ElevenLabs API key is required.',
     elevenlabsRateWait: (w) => `ElevenLabs rate limit — retrying in ${w}s`,
     elevenlabsError: (s, b) => `ElevenLabs API error (${s}): ${b}`,
+    needGrokKey: 'Grok is selected as the AI proofreading model — an xAI API key is required.',
+    grokRateWait: (w) => `Grok rate limit — retrying in ${w}s`,
+    grokError: (s, b) => `Grok API error (${s}): ${b}`,
+    grokEmpty: 'Grok returned an empty response.',
     requestTimeout: (s) => `No response within ${s}s — the request was aborted.`,
     stillWaiting: (s) => `Waiting for a response... ${s}s elapsed (this can be normal)`,
     noTranslationInResponse: 'No translation in the response.',
@@ -322,9 +330,10 @@ const els = {
   groqKey: $('groqKey'), groqKey2: $('groqKey2'), groqKey3: $('groqKey3'),
   anthropicKey: $('anthropicKey'), geminiKey: $('geminiKey'),
   geminiKey2: $('geminiKey2'), geminiKey3: $('geminiKey3'), openaiKey: $('openaiKey'),
-  elevenlabsKey: $('elevenlabsKey'),
+  elevenlabsKey: $('elevenlabsKey'), grokKey: $('grokKey'),
   sourceLang: $('sourceLang'), targetLang: $('targetLang'), model: $('model'),
   whisperModel: $('whisperModel'), sttEngineLabel: $('sttEngineLabel'), translateEngineLabel: $('translateEngineLabel'),
+  refineModel: $('refineModel'), refineEngineLabel: $('refineEngineLabel'),
   skipTranslate: $('skipTranslate'), renameKorean: $('renameKorean'), aiRefine: $('aiRefine'),
   styleGuide: $('styleGuide'), glossary: $('glossary'), corrections: $('corrections'),
   dropZone: $('dropZone'), fileInput: $('fileInput'), fileInfo: $('fileInfo'),
@@ -371,7 +380,7 @@ function populateLanguageSelects() {
 populateLanguageSelects();
 
 // 설정 localStorage 저장/복원 (드롭다운을 채운 뒤에 복원해야 저장값이 적용됨)
-const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'openaiKey', 'elevenlabsKey', 'sourceLang', 'targetLang', 'model', 'whisperModel', 'styleGuide', 'glossary', 'corrections'];
+const PERSIST = ['groqKey', 'groqKey2', 'groqKey3', 'anthropicKey', 'geminiKey', 'geminiKey2', 'geminiKey3', 'openaiKey', 'elevenlabsKey', 'grokKey', 'sourceLang', 'targetLang', 'model', 'whisperModel', 'refineModel', 'styleGuide', 'glossary', 'corrections'];
 for (const key of PERSIST) {
   if (!els[key]) continue; // 캐시된 옛 HTML에 아직 없는 입력칸은 건너뛴다
   const saved = localStorage.getItem(`subweb-${key}`);
@@ -414,9 +423,13 @@ function updateEngineLabels() {
       isOpenAiModel() ? 'GPT' :
       'Claude';
   }
+  if (els.refineEngineLabel) {
+    els.refineEngineLabel.textContent = els.refineModel?.value ? 'Grok' : els.translateEngineLabel?.textContent ?? '';
+  }
 }
 if (els.whisperModel) els.whisperModel.addEventListener('change', updateEngineLabels);
 if (els.model) els.model.addEventListener('change', updateEngineLabels);
+if (els.refineModel) els.refineModel.addEventListener('change', updateEngineLabels);
 updateEngineLabels();
 
 // ─────────────────────────────────────────────────────────────
@@ -1204,6 +1217,9 @@ class OpenAiFatalError extends Error {}
 // ElevenLabs 키/모델 오류 — 재시도 무의미, 즉시 전체 중단용
 class ElevenLabsFatalError extends Error {}
 
+// Grok(xAI) 키/모델 오류 — 재시도 무의미, 즉시 전체 중단용
+class GrokFatalError extends Error {}
+
 // Gemini가 빈 응답을 준 이유 중 안전 필터에 해당하는 값들
 const REFUSAL_REASONS = /SAFETY|PROHIBITED|BLOCKLIST|RECITATION|IMAGE_SAFETY/i;
 
@@ -1220,6 +1236,7 @@ function isFatalApiError(err) {
     err instanceof AnthropicFatalError ||
     err instanceof OpenAiFatalError ||
     err instanceof ElevenLabsFatalError ||
+    err instanceof GrokFatalError ||
     err instanceof Anthropic.AuthenticationError ||
     err instanceof Anthropic.PermissionDeniedError ||
     err instanceof Anthropic.NotFoundError
@@ -1516,8 +1533,81 @@ async function callOpenAi(prompt) {
   }
 }
 
-// 선택된 모델에 따라 Claude/Gemini/GPT로 라우팅 — 반환 형식은 동일한 JSON 객체
-async function callModel(prompt) {
+// xAI Grok Chat Completions API. OpenAI 호환 형식이라 callOpenAi와 거의 동일한 구조를 쓴다.
+// AI 교정 전용으로만 선택 가능(번역 모델 드롭다운에는 없음) — els.refineModel의 값을 그대로 받는다.
+async function callGrok(prompt, model) {
+  const key = els.grokKey.value.trim();
+
+  for (let attempt = 1; ; attempt++) {
+    checkCancelled();
+    const body = {
+      model,
+      messages: [{ role: 'user', content: prompt }],
+    };
+    body.response_format = rejects('structuredOutput', model)
+      ? { type: 'json_object' }
+      : { type: 'json_schema', json_schema: { name: 'translation_batch', strict: true, schema: TRANSLATION_SCHEMA } };
+    // grok-4.1-fast-non-reasoning처럼 애초에 추론이 없는 모델도 있지만, reasoning 모델을 고른
+    // 경우를 대비해 OpenAI/Claude와 같은 이유로 최소 단계(xAI는 'none'이 없어 'low'가 최소)를
+    // 명시적으로 보낸다. 거부되면 (기본값인 high로 조용히 새는 것을 막기 위해) 빼지 않고 중단한다.
+    if (!rejects('thinking', model)) body.reasoning_effort = 'low';
+
+    const res = await fetchWithTimeout('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify(body),
+      signal: abortController.signal,
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+
+      if (res.status === 400 && body.reasoning_effort && /reasoning_effort/i.test(errBody)) {
+        console.error(`reasoning_effort:low 가 거부되었습니다 (${model}):`, errBody);
+        markRejected('thinking', model);
+        throw new ThinkingUnsupportedError(T.thinkingRejected(model));
+      }
+
+      if (res.status === 400 && !rejects('structuredOutput', model) && /json_schema|response_format/i.test(errBody)) {
+        console.warn(`구조화 출력이 거부되어 일반 JSON 모드로 전환합니다 (${model}):`, errBody.slice(0, 300));
+        markRejected('structuredOutput', model);
+        continue;
+      }
+
+      if (res.status === 429 && attempt <= 3) {
+        const wait = 30;
+        setStatus(T.grokRateWait(wait));
+        await sleep(wait * 1000);
+        continue;
+      }
+
+      const message = T.grokError(res.status, errBody.slice(0, 300));
+      if ([400, 401, 403, 404].includes(res.status)) throw new GrokFatalError(message);
+      throw new Error(message);
+    }
+
+    const data = await res.json();
+    const text = data.choices?.[0]?.message?.content ?? '';
+    if (!text.trim()) throw new Error(T.grokEmpty);
+
+    const truncatedByLimit = data.choices?.[0]?.finish_reason === 'length';
+    try {
+      const parsed = JSON.parse(extractJsonPayload(text));
+      if (truncatedByLimit) parsed.truncated = true;
+      return parsed;
+    } catch (err) {
+      const salvaged = salvageTranslations(text);
+      if (salvaged.length > 0) return { translations: salvaged, truncated: true };
+      throw err;
+    }
+  }
+}
+
+// 선택된 모델에 따라 Claude/Gemini/GPT로 라우팅 — 반환 형식은 동일한 JSON 객체.
+// AI 교정 단계(opts.refine)에서 refineModel이 따로 지정돼 있으면(=번역 모델과 다르게
+// Grok을 쓰기로 한 경우) 그쪽으로 우선 라우팅한다.
+async function callModel(prompt, opts) {
+  if (opts?.refine && els.refineModel.value) return await callGrok(prompt, els.refineModel.value);
   if (isGeminiModel()) return await callGemini(prompt);
   if (isOpenAiModel()) return await callOpenAi(prompt);
   return await callClaude(prompt);
@@ -1529,7 +1619,7 @@ async function translateBatchWithSplit(batch, opts) {
     const buildPrompt = opts.fileName ? buildFileNamePrompt
       : opts.refine ? buildRefinePrompt
       : buildBatchPrompt;
-    const parsed = await callModel(buildPrompt(batch.map((b) => ({ id: b.id, text: b.text })), opts));
+    const parsed = await callModel(buildPrompt(batch.map((b) => ({ id: b.id, text: b.text })), opts), opts);
     const byId = new Map((parsed.translations ?? []).map((t) => [t.id, t.translation]));
 
     // 큰 배치에서 모델이 일부 줄을 빼먹거나 응답이 잘리면 빠진 줄만 모아 이어서 요청
@@ -2698,7 +2788,11 @@ async function run() {
       return;
     }
   }
-  const needsLlm = !skipTranslate || (hasMedia && els.aiRefine.checked);
+  const needsRefine = hasMedia && els.aiRefine.checked;
+  const refineUsesGrok = needsRefine && !!els.refineModel.value;
+  // refine이 번역 모델과 별개로 Grok을 쓰기로 한 경우, 번역을 건너뛰어도(skipTranslate)
+  // 번역 모델 키 검사는 필요 없다 — Grok 키만 있으면 됨.
+  const needsLlm = !skipTranslate || (needsRefine && !refineUsesGrok);
   if (needsLlm) {
     if (isGeminiModel()) {
       if (geminiKeys().length === 0) {
@@ -2714,6 +2808,10 @@ async function run() {
       showError(T.needAnthropicKey);
       return;
     }
+  }
+  if (refineUsesGrok && !els.grokKey.value.trim()) {
+    showError(T.needGrokKey);
+    return;
   }
   if (allSubtitles && skipTranslate) {
     showError(T.nothingToDo);

@@ -97,6 +97,10 @@
           ElevenLabs API 키 <span class="meta">— 음성 인식용(Scribe 모델 선택 시) · <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noreferrer noopener">elevenlabs.io</a> (무료 티어 있음)</span>
           <input type="password" id="elevenlabsKey" placeholder="sk_..." autocomplete="off" spellcheck="false" />
         </label>
+        <label>
+          xAI (Grok) API 키 <span class="meta">— AI 교정용(Grok 모델 선택 시) · <a href="https://console.x.ai" target="_blank" rel="noreferrer noopener">console.x.ai</a> (유료)</span>
+          <input type="password" id="grokKey" placeholder="xai-..." autocomplete="off" spellcheck="false" />
+        </label>
       </div>
       <details>
         <summary>Groq 예비 키 (선택) — 무료 한도 초과 시 자동으로 전환됩니다. 한도는 계정 단위라 다른 계정에서 발급한 키여야 효과가 있습니다.</summary>
@@ -176,6 +180,16 @@
             <label><input type="checkbox" id="aiRefine" /> AI 교정 (오인식 보정)</label>
           </span>
         </label>
+        <label>
+          AI 교정 모델 <span class="meta">(위 "AI 교정" 체크 시에만 사용)</span>
+          <select id="refineModel">
+            <option value="" selected>번역 모델과 동일</option>
+            <optgroup label="Grok — xAI 키 · 유료 · 검열 약함">
+              <option value="grok-4.1-fast-non-reasoning">Grok 4.1 Fast (non-reasoning) — 저렴·빠름 (추천)</option>
+              <option value="grok-4.1-fast-reasoning">Grok 4.1 Fast (reasoning) — 꼼꼼하게 검토</option>
+            </optgroup>
+          </select>
+        </label>
       </div>
       <details>
         <summary>번역 톤 / 용어집 / 교정 치환 (선택)</summary>
@@ -221,7 +235,7 @@
         <li data-step="audio">오디오 추출 <span class="step-status"></span></li>
         <li data-step="stt">자막 추출 (<span class="step-engine" id="sttEngineLabel">Whisper</span>) <span class="step-status"></span></li>
         <li data-step="filter">환각 필터 <span class="step-status"></span></li>
-        <li data-step="refine">AI 교정 (선택) <span class="step-status"></span></li>
+        <li data-step="refine">AI 교정 (<span class="step-engine" id="refineEngineLabel">Claude</span>) <span class="step-status"></span></li>
         <li data-step="translate">번역 (<span class="step-engine" id="translateEngineLabel">Claude</span>) <span class="step-status"></span></li>
       </ol>
       <div class="progress"><div id="progressBar"></div></div>
