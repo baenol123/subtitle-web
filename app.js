@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-13.4';
+const APP_VERSION = '2026-09-13.5';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -340,7 +340,7 @@ const els = {
   folderInput: $('folderInput'), folderPickBtn: $('folderPickBtn'),
   startBtn: $('startBtn'), cancelBtn: $('cancelBtn'),
   progressPanel: $('progressPanel'), steps: $('steps'),
-  progressBar: $('progressBar'), statusLine: $('statusLine'),
+  progressBar: $('progressBar'), statusLine: $('statusLine'), debugLog: $('debugLog'),
   errorBanner: $('errorBanner'),
   resultPanel: $('resultPanel'), resultStats: $('resultStats'),
   resultsList: $('resultsList'), downloadAllBtn: $('downloadAllBtn'),
@@ -469,6 +469,16 @@ function setProgress(ratio) {
 
 function setStatus(text) {
   els.statusLine.textContent = currentFileLabel ? `${currentFileLabel} — ${text}` : text;
+}
+
+// API 호출별 상태코드·소요시간·usage/refusal 같은 응답 메타데이터를 화면의 "디버그 로그"에
+// 남긴다. 실제 프롬프트/응답 본문은 담지 않는다(콘텐츠가 커서 로그가 금방 지저분해지고,
+// 실패 원인 파악에는 상태코드·타이밍·거부 여부 정도면 대부분 충분하기 때문).
+function logDebug(line) {
+  if (!els.debugLog) return;
+  const ts = new Date().toLocaleTimeString('ko-KR', { hour12: false });
+  els.debugLog.textContent += `[${ts}] ${line}\n`;
+  els.debugLog.scrollTop = els.debugLog.scrollHeight;
 }
 
 function showError(message) {
@@ -1283,13 +1293,16 @@ async function callClaude(prompt) {
       if (!rejects('structuredOutput', model)) {
         body.output_config = { format: { type: 'json_schema', schema: TRANSLATION_SCHEMA } };
       }
+      const t0 = Date.now();
       const message = await client.messages.create(body, { signal: abortController.signal });
+      logDebug(`Claude ${model} OK (${Date.now() - t0}ms) attempt=${attempt} stop=${message.stop_reason} usage=${JSON.stringify(message.usage ?? {})}`);
       if (message.stop_reason === 'refusal') {
         throw new ContentRefusalError(T.refusal);
       }
       const text = message.content.find((b) => b.type === 'text')?.text ?? '';
       return JSON.parse(extractJsonPayload(text));
     } catch (err) {
+      logDebug(`Claude ${model} 오류 attempt=${attempt}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`);
       // 400이면 어떤 파라미터가 거부됐는지 메시지로 갈라낸다
       if (err instanceof Anthropic.BadRequestError) {
         const detail = String(err.message ?? '');
@@ -1370,6 +1383,7 @@ async function callGemini(prompt) {
     const sendSafety = !rejects('safety', model);
 
     // Gemini는 파일 전체를 한 번에 보내는 경우가 많아 다른 곳보다 응답이 오래 걸릴 수 있다.
+    const t0 = Date.now();
     const res = await fetchWithTimeout(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
       {
@@ -1384,9 +1398,11 @@ async function callGemini(prompt) {
       },
       300000
     );
+    const elapsed = Date.now() - t0;
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
+      logDebug(`Gemini ${model} HTTP ${res.status} (${elapsed}ms): ${body.slice(0, 200)}`);
 
       // thinkingConfig를 거부하는 모델이면 파라미터를 빼고 한 번 더 시도
       if (res.status === 400 && thinking && /thinking/i.test(body)) {
@@ -1440,6 +1456,7 @@ async function callGemini(prompt) {
 
     const data = await res.json();
     const text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+    logDebug(`Gemini ${model} HTTP 200 (${elapsed}ms) finish=${data.candidates?.[0]?.finishReason} usage=${JSON.stringify(data.usageMetadata ?? {})}`);
     if (!text.trim()) {
       const reason = data.promptFeedback?.blockReason ?? data.candidates?.[0]?.finishReason ?? 'EMPTY';
       // 안전 필터 차단이면 재시도해도 같은 결과 — 분할해서 문제 줄만 골라내야 한다
@@ -1481,15 +1498,18 @@ async function callOpenAi(prompt) {
     // 조용히 요금을 물릴 뿐이라, 새는 것보다 멈추고 알리는 편이 낫다.
     if (!rejects('thinking', model)) body.reasoning_effort = 'none';
 
+    const t0 = Date.now();
     const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify(body),
       signal: abortController.signal,
     });
+    const elapsed = Date.now() - t0;
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
+      logDebug(`OpenAI ${model} HTTP ${res.status} (${elapsed}ms) attempt=${attempt}: ${errBody.slice(0, 200)}`);
 
       if (res.status === 400 && body.reasoning_effort && /reasoning_effort/i.test(errBody)) {
         console.error(`reasoning_effort:none 이 거부되었습니다 (${model}):`, errBody);
@@ -1517,10 +1537,15 @@ async function callOpenAi(prompt) {
     }
 
     const data = await res.json();
-    const text = data.choices?.[0]?.message?.content ?? '';
+    const choice = data.choices?.[0];
+    logDebug(`OpenAI ${model} HTTP 200 (${elapsed}ms) attempt=${attempt} finish=${choice?.finish_reason} refusal=${choice?.message?.refusal ?? 'null'} usage=${JSON.stringify(data.usage ?? {})}`);
+    if (choice?.message?.refusal) {
+      throw new ContentRefusalError(T.refusal);
+    }
+    const text = choice?.message?.content ?? '';
     if (!text.trim()) throw new Error(T.openaiEmpty);
 
-    const truncatedByLimit = data.choices?.[0]?.finish_reason === 'length';
+    const truncatedByLimit = choice?.finish_reason === 'length';
     try {
       const parsed = JSON.parse(extractJsonPayload(text));
       if (truncatedByLimit) parsed.truncated = true;
@@ -1552,15 +1577,18 @@ async function callGrok(prompt, model) {
     // ("does not support parameter reasoningEffort") — Claude/GPT처럼 파라미터로 추론을
     // 끄는 방식이 아니라 애초에 non-reasoning 모델을 고르는 것으로 비용을 조절해야 한다.
 
+    const t0 = Date.now();
     const res = await fetchWithTimeout('https://api.x.ai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify(body),
       signal: abortController.signal,
     });
+    const elapsed = Date.now() - t0;
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
+      logDebug(`Grok ${model} HTTP ${res.status} (${elapsed}ms) attempt=${attempt}: ${errBody.slice(0, 200)}`);
 
       if (res.status === 400 && !rejects('structuredOutput', model) && /json_schema|response_format/i.test(errBody)) {
         console.warn(`구조화 출력이 거부되어 일반 JSON 모드로 전환합니다 (${model}):`, errBody.slice(0, 300));
@@ -1581,10 +1609,19 @@ async function callGrok(prompt, model) {
     }
 
     const data = await res.json();
-    const text = data.choices?.[0]?.message?.content ?? '';
+    const choice = data.choices?.[0];
+    // OpenAI 호환 형식이라 message.refusal 필드가 있다 — 이걸 안 보면 콘텐츠 거부를 그냥
+    // "빈 응답" 일반 오류로 오인해서, 다시 보내도 매번 똑같이 거부될 걸 계속 재시도·분할만
+    // 반복하게 된다(재시도는 무의미하고 분할 예산만 낭비함). Claude(stop_reason:'refusal')/
+    // Gemini(safety block)와 같은 이유로 ContentRefusalError로 즉시 분리 처리한다.
+    logDebug(`Grok ${model} HTTP 200 (${elapsed}ms) attempt=${attempt} finish=${choice?.finish_reason} refusal=${choice?.message?.refusal ?? 'null'} usage=${JSON.stringify(data.usage ?? {})}`);
+    if (choice?.message?.refusal) {
+      throw new ContentRefusalError(T.refusal);
+    }
+    const text = choice?.message?.content ?? '';
     if (!text.trim()) throw new Error(T.grokEmpty);
 
-    const truncatedByLimit = data.choices?.[0]?.finish_reason === 'length';
+    const truncatedByLimit = choice?.finish_reason === 'length';
     try {
       const parsed = JSON.parse(extractJsonPayload(text));
       if (truncatedByLimit) parsed.truncated = true;
@@ -2829,6 +2866,7 @@ async function run() {
   els.progressPanel.classList.remove('hidden');
   els.startBtn.disabled = true;
   els.cancelBtn.classList.remove('hidden');
+  if (els.debugLog) els.debugLog.textContent = '';
   resetSteps();
   setProgress(0);
 
