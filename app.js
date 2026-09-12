@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-13.3';
+const APP_VERSION = '2026-09-13.4';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -1782,12 +1782,17 @@ const NAME_PREFIX_TOKENS = [
   new RegExp(`^[[(#]?\\s*(?:EP|Episode)?\\s*\\d+(?:\\s*[-._~]\\s*\\d+)*\\s*[)\\]]?(?=[${AFFIX_MARK})\\]]|$)`, 'i'),  // 회차 번호
   new RegExp(`^(?:TR|Track|Disc|CD|Vol|SE)\\s*\\d*(?=[${AFFIX_MARK}]|$)`, 'i'), // 트랙·디스크 표기
 ];
-// 효과음 유무 표기. 괄호로 감싼 형태까지 인식한다: _SEless, (SEなし), 【効果音なし】 …
-const SE_MARK = '(?:SE\\s*(?:less|なし|無し|カット|cut|off|オフ|あり|有り|入り)?|no\\s*SE|効果音\\s*(?:なし|無し|カット|オフ|あり|有り|入り))';
+// 효과음 유무 표기. 괄호로 감싼 형태까지 인식한다: _SEless, (SEなし), 【効果音なし】, (SE 없음) …
+// 파일명/폴더명 번역 기능이 이 표기 자체를 한글로 바꿔버릴 수 있어서(예: "水音SEなし" →
+// "물소리 SE 없음") 한글 표기(없음/없이/있음)도 같이 인식해야 번역 후 재스캔에서도 안 깨진다.
+const SE_MARK = '(?:SE\\s*(?:less|なし|無し|カット|cut|off|オフ|없음|없이|あり|有り|入り|있음)?|no\\s*SE|(?:効果音|효과음)\\s*(?:なし|無し|カット|オフ|없음|없이|あり|有り|入り|있음))';
 const NAME_SUFFIX_TOKENS = [
   new RegExp(`[${AFFIX_MARK}]+$`),
   new RegExp(`[\\s_\\-–—.]*[(（[［【〔]\\s*${SE_MARK}\\s*[)）\\]］】〕]$`, 'i'),      // (SEなし) 【効果音なし】
-  /[\s_\-–—.]*(?:SE\s*(?:less|なし|無し|カット|オフ|あり|有り|入り)|no\s*SE|効果音\s*(?:なし|無し|カット|オフ|あり|有り|入り))$/i,
+  // 괄호 없는 형태(_SEなし, SE 없음). SE_MARK의 "SE"만 단독으로도 매칭되는 옵션(?)까지
+  // 그대로 가져오면 "TitleSE"처럼 무관한 단어 끝까지 suffix로 오인식하니, 반드시 뒤에
+  // 없음/있음 계열 단어가 붙어야만 매칭되도록 optional(?) 없이 직접 나열한다.
+  /[\s_\-–—.]*(?:SE\s*(?:less|なし|無し|カット|cut|off|オフ|없음|없이|あり|有り|入り|있음)|no\s*SE|(?:効果音|효과음)\s*(?:なし|無し|カット|オフ|없음|없이|あり|有り|入り|있음))$/i,
   /[\s_\-–—.]+SE$/i,                                                            // 구분자가 앞에 있을 때만 맨 SE
 ];
 
@@ -2705,7 +2710,8 @@ function pairCompanionSubtitles(files) {
 
 // splitNameAffixes가 떼어낸 suffix 중 "효과음 없음" 계열만 골라낸다.
 // (있음 계열이나 맨 "_SE"는 걸리지 않게 해서 애매하면 합치지 않는다.)
-const NO_SE_SUFFIX_RE = /less|なし|無し|カット|cut|off|オフ/i;
+// 파일명 번역 후 한글 표기("없음")로 재스캔되는 경우도 있어 같이 인식한다.
+const NO_SE_SUFFIX_RE = /less|なし|無し|カット|cut|off|オフ|없음|없이/i;
 
 // 같은 폴더에서 제목(prefix+body)이 같고 "효과음 있음/없음" suffix만 다른 미디어들을 묶는다.
 // 효과음 없는 판이 정확히 하나면 그걸로만 STT를 돌리고, 나머지(효과음 있는 판 등)는
@@ -2737,7 +2743,7 @@ function pairSeVariants(files) {
 // 파일명이 부모 폴더와 완전히 똑같은 패턴(실사용 폴더 구조에서 확인됨). 하위 폴더
 // 이름에 SE/효과음 + 없음 계열 단어가 같이 있고, 부모 폴더에 같은 파일명이 있으면
 // 그 하위 폴더 쪽(효과음 없음)을 primary로 삼아 부모 쪽(효과음 있음)이 재사용하게 한다.
-const NO_SE_FOLDER_RE = /(SE|効果音).{0,4}(less|なし|無し|カット|cut|off|オフ)/i;
+const NO_SE_FOLDER_RE = /(SE|効果音|효과음).{0,4}(less|なし|無し|カット|cut|off|オフ|없음|없이)/i;
 
 function pairSeVariantsByFolder(files) {
   const byDirAndName = new Map(); // `dir::파일명` → File
