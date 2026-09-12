@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-13.5';
+const APP_VERSION = '2026-09-13.6';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -1677,9 +1677,12 @@ async function translateBatchWithSplit(batch, opts) {
 
     return batch.map((b) => {
       const translation = byId.get(b.id);
-      return translation !== undefined
-        ? { id: b.id, translation: translation.trim() }
-        : { id: b.id, error: T.noTranslationInResponse };
+      if (translation !== undefined) return { id: b.id, translation: translation.trim() };
+      // 교정 모드는 "고칠 줄만 반환"이 정상이라 응답에 없는 줄 = 고칠 것 없음(정상)이다.
+      // error를 붙이면 refineBlocks가 이걸 전부 "교정 못함"으로 잘못 세게 된다 — 실제로는
+      // 성공적으로 검토했는데 고칠 게 없었던 줄일 뿐이라, 번역 모드(모든 줄이 반드시 있어야
+      // 함)와 달리 여기서는 에러가 아니다.
+      return opts.refine ? { id: b.id } : { id: b.id, error: T.noTranslationInResponse };
     });
   } catch (err) {
     if (cancelled || isFatalApiError(err)) throw err;
