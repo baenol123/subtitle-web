@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-13.2';
+const APP_VERSION = '2026-09-13.3';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -1547,10 +1547,10 @@ async function callGrok(prompt, model) {
     body.response_format = rejects('structuredOutput', model)
       ? { type: 'json_object' }
       : { type: 'json_schema', json_schema: { name: 'translation_batch', strict: true, schema: TRANSLATION_SCHEMA } };
-    // grok-4.1-fast-non-reasoning처럼 애초에 추론이 없는 모델도 있지만, reasoning 모델을 고른
-    // 경우를 대비해 OpenAI/Claude와 같은 이유로 최소 단계(xAI는 'none'이 없어 'low'가 최소)를
-    // 명시적으로 보낸다. 거부되면 (기본값인 high로 조용히 새는 것을 막기 위해) 빼지 않고 중단한다.
-    if (!rejects('thinking', model)) body.reasoning_effort = 'low';
+    // 실제 API로 확인함(2026-09): grok-4.20 계열은 reasoning/non-reasoning 이 별개 모델
+    // ID로 나뉘어 있고 reasoning_effort 파라미터 자체를 (reasoning 모델조차) 거부한다
+    // ("does not support parameter reasoningEffort") — Claude/GPT처럼 파라미터로 추론을
+    // 끄는 방식이 아니라 애초에 non-reasoning 모델을 고르는 것으로 비용을 조절해야 한다.
 
     const res = await fetchWithTimeout('https://api.x.ai/v1/chat/completions', {
       method: 'POST',
@@ -1561,12 +1561,6 @@ async function callGrok(prompt, model) {
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
-
-      if (res.status === 400 && body.reasoning_effort && /reasoning_effort/i.test(errBody)) {
-        console.error(`reasoning_effort:low 가 거부되었습니다 (${model}):`, errBody);
-        markRejected('thinking', model);
-        throw new ThinkingUnsupportedError(T.thinkingRejected(model));
-      }
 
       if (res.status === 400 && !rejects('structuredOutput', model) && /json_schema|response_format/i.test(errBody)) {
         console.warn(`구조화 출력이 거부되어 일반 JSON 모드로 전환합니다 (${model}):`, errBody.slice(0, 300));
