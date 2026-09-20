@@ -1,0 +1,145 @@
+const assert = require('node:assert/strict');
+const { test } = require('node:test');
+const { loadApp } = require('./helpers/load-app.cjs');
+
+function file(path) {
+  return { name: path.split('/').at(-1), webkitRelativePath: path, size: 0 };
+}
+
+function tracks() {
+  // Same structure as the reported collection, with neutral synthetic titles.
+  return Array.from({ length: 5 }, (_, i) => {
+    const number = String(i + 1).padStart(2, '0');
+    return [
+      file(`Collection/02.Audio/${number}.Track ${number}.wav`),
+      file(`Collection/02.Audio/SE無し版/${number}(SE無し).Track ${number}.wav`),
+    ];
+  });
+}
+
+test('pairs all five tracks when the child filename has an inline SE marker', () => {
+  const pairs = tracks();
+  for (const files of [pairs.flat(), pairs.flat().reverse()]) {
+    const { primaryOf, filesToProcess } = loadApp().pairSeVariantsByFolder(files);
+    assert.equal(primaryOf.size, 5);
+    assert.equal(filesToProcess.length, 5);
+    for (const [original, clean] of pairs) {
+      assert.equal(primaryOf.get(original), clean);
+      assert.ok(filesToProcess.includes(clean));
+      assert.ok(!filesToProcess.includes(original));
+    }
+  }
+});
+
+test('keeps support for identical parent and child filenames', () => {
+  const original = file('Audio/01.Opening.wav');
+  const clean = file('Audio/水音SEなし/01.Opening.wav');
+  assert.equal(loadApp().pairSeVariantsByFolder([original, clean]).primaryOf.get(original), clean);
+});
+
+for (const marker of ['(SE無し)', '（SEなし）', '[SEless]', '【効果音なし】', '(SE 없음)']) {
+  test(`recognizes the explicit filename marker ${marker}`, () => {
+    const original = file('Audio/01.Opening.wav');
+    const clean = file(`Audio/SE無し版/01${marker}.Opening.wav`);
+    assert.equal(loadApp().pairSeVariantsByFolder([original, clean]).primaryOf.get(original), clean);
+  });
+}
+
+test('does not erase track numbers, title tags, titles, or file extensions', () => {
+  const clean = file('Audio/SE無し版/01(SE無し).[Bonus]Opening.wav');
+  for (const name of ['02.[Bonus]Opening.wav', '01.[Main]Opening.wav', '01.[Bonus]Ending.wav', '01.[Bonus]Opening.mp3']) {
+    const original = file(`Audio/${name}`);
+    const { primaryOf, filesToProcess } = loadApp().pairSeVariantsByFolder([original, clean]);
+    assert.equal(primaryOf.size, 0, name);
+    assert.equal(filesToProcess.length, 2);
+  }
+});
+
+test('only pairs a clean child folder with its own immediate parent', () => {
+  for (const folder of ['Audio/Alternative', 'Other/SE無し版', 'Audio/Extra/SE無し版']) {
+    const files = [file('Audio/01.Opening.wav'), file(`${folder}/01(SE無し).Opening.wav`)];
+    assert.equal(loadApp().pairSeVariantsByFolder(files).primaryOf.size, 0);
+  }
+});
+
+test('does not guess between multiple clean versions', () => {
+  const files = [
+    file('Audio/01.Opening.wav'),
+    file('Audio/SE無し版/01.Opening.wav'),
+    file('Audio/SEless/01.Opening.wav'),
+  ];
+  const { primaryOf, filesToProcess } = loadApp().pairSeVariantsByFolder(files);
+  assert.equal(primaryOf.size, 0);
+  assert.equal(filesToProcess.length, 3);
+});
+
+test('does not guess between parent names that become identical after normalization', () => {
+  const files = [file('Audio/01.Opening.wav'), file('Audio/01(SEあり).Opening.wav'), file('Audio/SE無し版/01(SE無し).Opening.wav')];
+  assert.equal(loadApp().pairSeVariantsByFolder(files).primaryOf.size, 0);
+});
+
+test('ignores subtitle inputs and handles a clean file without a counterpart', () => {
+  const files = [file('Audio/01.Opening.srt'), file('Audio/SE無し版/01(SE無し).Opening.srt'), file('Audio/SE無し版/02(SE無し).Other.wav')];
+  const { primaryOf, filesToProcess } = loadApp().pairSeVariantsByFolder(files);
+  assert.equal(primaryOf.size, 0);
+  assert.equal(filesToProcess.length, 3);
+  assert.equal(loadApp().pairSeVariantsByFolder([]).filesToProcess.length, 0);
+});
+
+test('preserves same-folder suffix pairing', () => {
+  const original = file('Audio/01.Opening.wav');
+  const clean = file('Audio/01.Opening_SEless.wav');
+  const app = loadApp();
+  const folder = app.pairSeVariantsByFolder([original, clean]);
+  assert.equal(app.pairSeVariants(folder.filesToProcess).primaryOf.get(original), clean);
+});
+
+function element() {
+  return { checked: false, value: '', children: [], classList: { add() {}, remove() {}, toggle() {} }, append(...children) { this.children.push(...children); } };
+}
+
+function pipelineApp(files) {
+  const els = Object.fromEntries(['skipTranslate', 'aiRefine', 'refineModel', 'renameKorean', 'errorBanner', 'resultPanel', 'resultsList', 'downloadAllBtn', 'progressPanel', 'startBtn', 'cancelBtn', 'resultStats', 'fileInfo'].map(key => [key, element()]));
+  const calls = [];
+  const errors = [];
+  const app = loadApp({
+    els, selectedFiles: files, extraFiles: [], running: false,
+    document: { createElement: element }, AbortController,
+    T: { filesSelected: count => String(count), seReuseKind: 'reuse-clean', mediaKind: 'extract', batchDone: (ok, total) => `${ok}/${total}`, done: 'done' },
+    groqKeys: () => ['test'], geminiKeys: () => ['test'], isGeminiModel: () => true,
+    isElevenLabsModel: () => false, isFatalApiError: () => false,
+    resetSteps() {}, setProgress() {}, setStatus() {}, checkCancelled() {}, renderResultRow() {},
+    showError: message => errors.push(message),
+    translateRelDir: dir => dir,
+    processOne: async input => {
+      calls.push(input);
+      return { fileName: input.name, baseName: input.name.replace(/\.[^.]+$/, ''), translatedName: input.name.replace(/\.[^.]+$/, ''), relDir: input.webkitRelativePath.slice(0, input.webkitRelativePath.lastIndexOf('/')), origRelDir: input.webkitRelativePath.slice(0, input.webkitRelativePath.lastIndexOf('/')), originalSrt: `original:${input.name}`, translatedSrt: `translated:${input.name}`, blockCount: 1, failed: 0 };
+    },
+  });
+  return { app, els, calls, errors };
+}
+
+test('file preview labels the five parent tracks for subtitle reuse', () => {
+  const { app, els } = pipelineApp(tracks().flat());
+  app.handleFiles(tracks().flat(), { filterExts: true });
+  const labels = els.fileInfo.children.map(child => child.textContent);
+  assert.equal(labels.filter(text => text.includes('reuse-clean')).length, 5);
+  assert.equal(labels.filter(text => text.includes('extract')).length, 5);
+});
+
+test('batch processes five clean tracks and exports subtitles for all ten files', async () => {
+  const pairs = tracks();
+  const { app, els, calls, errors } = pipelineApp(pairs.flat());
+  await app.run();
+  assert.deepEqual(errors, []);
+  assert.equal(calls.length, 5);
+  assert.ok(calls.every(input => input.webkitRelativePath.includes('/SE無し版/')));
+  assert.equal(app.allResults.length, 10);
+  assert.equal(els.resultStats.textContent, '10/10');
+  for (const [original, clean] of pairs) {
+    const result = app.allResults.find(item => item.fileName === original.name);
+    assert.equal(result.originalSrt, `original:${clean.name}`);
+    assert.equal(result.translatedSrt, `translated:${clean.name}`);
+    assert.equal(result.origRelDir, 'Collection/02.Audio');
+  }
+});
