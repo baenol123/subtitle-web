@@ -24,6 +24,14 @@ Upload a video or audio file — Whisper AI extracts SRT subtitles, then Gemini 
 - API 키는 사용자 브라우저(localStorage)에만 저장
 - SRT / VTT 파일을 올리면 번역만 수행
 
+### 효과음 없는 판의 자막 재사용
+
+폴더째 선택했을 때 `음성/01.제목.wav`와
+`음성/SE無し版/01(SE無し).제목.wav`는 같은 트랙으로 인식합니다.
+효과음 없는 판만 추출·교정·번역하고, 양쪽 파일에 동일한 자막을 제공합니다.
+괄호로 감싼 SE 표기만 비교에서 제외하며 번호·제목·확장자가 다르거나
+대응 후보가 여러 개면 각각 처리합니다. 두 판의 대사 타이밍이 같아야 합니다.
+
 ## 번역 모델 / Translation models
 
 기본값은 **`gemini-3.1-flash-lite`** 입니다. 모델 id가 `gemini`로 시작하면 Gemini API,
@@ -53,3 +61,9 @@ python -m http.server 8000   # 로컬 실행 (file:// 로는 동작하지 않음
 ```
 
 새 도구 페이지는 `_template.html`을 복사해서 만듭니다. 자세한 내용은 `사용법.txt` 참고.
+
+SE 판별 및 처리 흐름 회귀 테스트 (Node.js 24, 추가 패키지·API 호출 없음):
+
+```
+node --test tests/se-variants.test.cjs
+```

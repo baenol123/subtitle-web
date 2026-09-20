@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-13.6';
+const APP_VERSION = '2026-09-20.1';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -2780,18 +2780,21 @@ function pairSeVariants(files) {
 
 // 효과음 유무가 파일명 접미사가 아니라 "폴더 자체"로 나뉜 경우 — 예: "02.音声/" 안에
 // 원본이 있고 그 안에 "水音SEなし"(효과음 없음) 하위 폴더가 따로 있는데, 그 안의
-// 파일명이 부모 폴더와 완전히 똑같은 패턴(실사용 폴더 구조에서 확인됨). 하위 폴더
-// 이름에 SE/효과음 + 없음 계열 단어가 같이 있고, 부모 폴더에 같은 파일명이 있으면
-// 그 하위 폴더 쪽(효과음 없음)을 primary로 삼아 부모 쪽(효과음 있음)이 재사용하게 한다.
+// 파일명이 부모 폴더와 같거나 "01(SE無し).제목.wav"처럼 괄호로 감싼 SE 표기만 다른 경우.
+// 번호·제목·일반 말머리·확장자는 그대로 비교하고, 명시적인 SE 표기만 비교에서 제외한다.
+// 부모 파일과 효과음 없는 판이 각각 하나로 확인될 때만 자막을 재사용한다.
 const NO_SE_FOLDER_RE = /(SE|効果音|효과음).{0,4}(less|なし|無し|カット|cut|off|オフ|없음|없이)/i;
+const BRACKETED_SE_MARK_RE = new RegExp(`[(（[［【〔]\\s*${SE_MARK}\\s*[)）\\]］】〕]`, 'gi');
 
 function pairSeVariantsByFolder(files) {
-  const byDirAndName = new Map(); // `dir::파일명` → File
+  const byDirAndName = new Map(); // `dir::SE 표기만 제외한 파일명` → File[]
   for (const f of files) {
     if (isSubtitleFile(f)) continue;
-    byDirAndName.set(`${relDirOf(f)}::${f.name}`, f);
+    const key = `${relDirOf(f)}::${f.name.replace(BRACKETED_SE_MARK_RE, '')}`;
+    if (!byDirAndName.has(key)) byDirAndName.set(key, []);
+    byDirAndName.get(key).push(f);
   }
-  const primaryOf = new Map(); // 부모 폴더(효과음 있음) File → 하위 폴더(효과음 없음) File
+  const candidates = new Map(); // 부모 File → 대응할 수 있는 효과음 없는 File[]
   for (const f of files) {
     if (isSubtitleFile(f)) continue;
     const dir = relDirOf(f);
@@ -2799,8 +2802,16 @@ function pairSeVariantsByFolder(files) {
     const leaf = segs[segs.length - 1];
     if (!leaf || !NO_SE_FOLDER_RE.test(leaf)) continue;
     const parentDir = segs.slice(0, -1).join('/');
-    const counterpart = byDirAndName.get(`${parentDir}::${f.name}`);
-    if (counterpart && counterpart !== f) primaryOf.set(counterpart, f);
+    const name = f.name.replace(BRACKETED_SE_MARK_RE, '');
+    const counterparts = byDirAndName.get(`${parentDir}::${name}`);
+    if (!counterparts || counterparts.length !== 1) continue;
+    const counterpart = counterparts[0];
+    if (!candidates.has(counterpart)) candidates.set(counterpart, []);
+    candidates.get(counterpart).push(f);
+  }
+  const primaryOf = new Map(); // 부모 폴더(효과음 있음) File → 하위 폴더(효과음 없음) File
+  for (const [counterpart, cleanVersions] of candidates) {
+    if (cleanVersions.length === 1) primaryOf.set(counterpart, cleanVersions[0]);
   }
   return { primaryOf, filesToProcess: files.filter((f) => !primaryOf.has(f)) };
 }
