@@ -20,7 +20,7 @@ function tracks() {
 test('pairs all five tracks when the child filename has an inline SE marker', () => {
   const pairs = tracks();
   for (const files of [pairs.flat(), pairs.flat().reverse()]) {
-    const { primaryOf, filesToProcess } = loadApp().pairSeVariantsByFolder(files);
+    const { primaryOf, filesToProcess } = loadApp().pairAudioVariants(files);
     assert.equal(primaryOf.size, 5);
     assert.equal(filesToProcess.length, 5);
     for (const [original, clean] of pairs) {
@@ -34,14 +34,14 @@ test('pairs all five tracks when the child filename has an inline SE marker', ()
 test('keeps support for identical parent and child filenames', () => {
   const original = file('Audio/01.Opening.wav');
   const clean = file('Audio/水音SEなし/01.Opening.wav');
-  assert.equal(loadApp().pairSeVariantsByFolder([original, clean]).primaryOf.get(original), clean);
+  assert.equal(loadApp().pairAudioVariants([original, clean]).primaryOf.get(original), clean);
 });
 
 for (const marker of ['(SE無し)', '（SEなし）', '[SEless]', '【効果音なし】', '(SE 없음)']) {
   test(`recognizes the explicit filename marker ${marker}`, () => {
     const original = file('Audio/01.Opening.wav');
     const clean = file(`Audio/SE無し版/01${marker}.Opening.wav`);
-    assert.equal(loadApp().pairSeVariantsByFolder([original, clean]).primaryOf.get(original), clean);
+    assert.equal(loadApp().pairAudioVariants([original, clean]).primaryOf.get(original), clean);
   });
 }
 
@@ -49,7 +49,7 @@ test('does not erase track numbers, title tags, titles, or file extensions', () 
   const clean = file('Audio/SE無し版/01(SE無し).[Bonus]Opening.wav');
   for (const name of ['02.[Bonus]Opening.wav', '01.[Main]Opening.wav', '01.[Bonus]Ending.wav', '01.[Bonus]Opening.mp3']) {
     const original = file(`Audio/${name}`);
-    const { primaryOf, filesToProcess } = loadApp().pairSeVariantsByFolder([original, clean]);
+    const { primaryOf, filesToProcess } = loadApp().pairAudioVariants([original, clean]);
     assert.equal(primaryOf.size, 0, name);
     assert.equal(filesToProcess.length, 2);
   }
@@ -58,7 +58,7 @@ test('does not erase track numbers, title tags, titles, or file extensions', () 
 test('only pairs a clean child folder with its own immediate parent', () => {
   for (const folder of ['Audio/Alternative', 'Other/SE無し版', 'Audio/Extra/SE無し版']) {
     const files = [file('Audio/01.Opening.wav'), file(`${folder}/01(SE無し).Opening.wav`)];
-    assert.equal(loadApp().pairSeVariantsByFolder(files).primaryOf.size, 0);
+    assert.equal(loadApp().pairAudioVariants(files).primaryOf.size, 0);
   }
 });
 
@@ -68,30 +68,31 @@ test('does not guess between multiple clean versions', () => {
     file('Audio/SE無し版/01.Opening.wav'),
     file('Audio/SEless/01.Opening.wav'),
   ];
-  const { primaryOf, filesToProcess } = loadApp().pairSeVariantsByFolder(files);
+  const { primaryOf, filesToProcess } = loadApp().pairAudioVariants(files);
   assert.equal(primaryOf.size, 0);
   assert.equal(filesToProcess.length, 3);
 });
 
-test('does not guess between parent names that become identical after normalization', () => {
+test('each marked parent variant reuses the uniquely preferred clean file', () => {
   const files = [file('Audio/01.Opening.wav'), file('Audio/01(SEあり).Opening.wav'), file('Audio/SE無し版/01(SE無し).Opening.wav')];
-  assert.equal(loadApp().pairSeVariantsByFolder(files).primaryOf.size, 0);
+  const { primaryOf } = loadApp().pairAudioVariants(files);
+  assert.equal(primaryOf.get(files[0]), files[2]);
+  assert.equal(primaryOf.get(files[1]), files[2]);
 });
 
 test('ignores subtitle inputs and handles a clean file without a counterpart', () => {
   const files = [file('Audio/01.Opening.srt'), file('Audio/SE無し版/01(SE無し).Opening.srt'), file('Audio/SE無し版/02(SE無し).Other.wav')];
-  const { primaryOf, filesToProcess } = loadApp().pairSeVariantsByFolder(files);
+  const { primaryOf, filesToProcess } = loadApp().pairAudioVariants(files);
   assert.equal(primaryOf.size, 0);
   assert.equal(filesToProcess.length, 3);
-  assert.equal(loadApp().pairSeVariantsByFolder([]).filesToProcess.length, 0);
+  assert.equal(loadApp().pairAudioVariants([]).filesToProcess.length, 0);
 });
 
 test('preserves same-folder suffix pairing', () => {
   const original = file('Audio/01.Opening.wav');
   const clean = file('Audio/01.Opening_SEless.wav');
   const app = loadApp();
-  const folder = app.pairSeVariantsByFolder([original, clean]);
-  assert.equal(app.pairSeVariants(folder.filesToProcess).primaryOf.get(original), clean);
+  assert.equal(app.pairAudioVariants([original, clean]).primaryOf.get(original), clean);
 });
 
 function element() {

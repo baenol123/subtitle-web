@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-20.1';
+const APP_VERSION = '2026-09-23.1';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -100,7 +100,7 @@ const STRINGS = {
     reuseKind: '영상/오디오 → 기존 자막 재사용(추출 생략, 번역만)',
     consumedKind: '자막 → 위 파일이 재사용함(별도 처리 안 함)',
     nameOnlyKind: '기타 파일 → 파일명만 번역(내용은 처리 안 함)',
-    seReuseKind: '영상/오디오 → 효과음 없는 판과 대사 동일, 그 자막 재사용(추출 생략)',
+    seReuseKind: '영상/오디오 → 같은 트랙의 우선 음성 자막 재사용(추출 생략)',
     filesSelected: (n, mb) => `파일 ${n}개 · 총 ${mb} MB`,
     needGroqKey: '자막 추출에는 Groq API 키가 필요합니다.',
     needAnthropicKey: '번역에는 Anthropic API 키가 필요합니다.',
@@ -193,7 +193,7 @@ const STRINGS = {
     reuseKind: 'video/audio → reuse existing subtitle (skip extraction, translate only)',
     consumedKind: 'subtitle → reused by the file above (not processed separately)',
     nameOnlyKind: 'other file → file name only (content not processed)',
-    seReuseKind: 'video/audio → same dialogue as the SE-less version, reusing its subtitle (skip extraction)',
+    seReuseKind: 'video/audio → reuse subtitles from the preferred audio variant (skip extraction)',
     filesSelected: (n, mb) => `${n} file(s) · ${mb} MB total`,
     needGroqKey: 'A Groq API key is required for subtitle extraction.',
     needAnthropicKey: 'An Anthropic API key is required for translation.',
@@ -637,15 +637,13 @@ function handleFiles(files, opts = {}) {
   // 미리보기 목록에도 실제 run()과 같은 짝짓기 결과를 반영한다 —
   // 그렇지 않으면 짝지어진 미디어도 "추출+번역"으로 표시돼 실제 동작과 어긋나 보인다.
   const { companionOf, filesToProcess: afterCompanionPreview } = pairCompanionSubtitles(selectedFiles);
-  const { primaryOf: primaryOfFolderPreview, filesToProcess: afterFolderSePreview } = pairSeVariantsByFolder(afterCompanionPreview);
-  const { primaryOf: primaryOfSuffixPreview } = pairSeVariants(afterFolderSePreview);
-  const primaryOfPreview = new Map([...primaryOfFolderPreview, ...primaryOfSuffixPreview]);
+  const { primaryOf: primaryOfPreview } = pairAudioVariants(afterCompanionPreview);
   const consumedSubtitles = new Set(companionOf.values());
   const lines = [...selectedFiles, ...extraFiles].map((f) => {
     const kind = extraFiles.includes(f) ? T.nameOnlyKind
       : consumedSubtitles.has(f) ? T.consumedKind
       : isSubtitleFile(f) ? T.subtitleKind
-      : primaryOfPreview.has(f) ? T.seReuseKind
+      : primaryOfPreview.has(f) ? `${T.seReuseKind} — ${primaryOfPreview.get(f).webkitRelativePath || primaryOfPreview.get(f).name}`
       : companionOf.has(f) ? T.reuseKind
       : T.mediaKind;
     const path = relDirOf(f) ? `${relDirOf(f)}/` : '';
@@ -2748,83 +2746,86 @@ function pairCompanionSubtitles(files) {
   return { companionOf, filesToProcess: files.filter((f) => !consumed.has(f)) };
 }
 
-// splitNameAffixes가 떼어낸 suffix 중 "효과음 없음" 계열만 골라낸다.
-// (있음 계열이나 맨 "_SE"는 걸리지 않게 해서 애매하면 합치지 않는다.)
-// 파일명 번역 후 한글 표기("없음")로 재스캔되는 경우도 있어 같이 인식한다.
-const NO_SE_SUFFIX_RE = /less|なし|無し|カット|cut|off|オフ|없음|없이/i;
+// SE와 음성 가공은 서로 다른 속성이다. 표시가 없으면 "없음"으로 추정하지 않는다.
+const AUDIO_OFF_MARK = '(?:less|なし|無し|カット|cut|off|オフ|없음|없이|none)';
+const AUDIO_ON_MARK = '(?:あり|有り|入り|있음|on|オン)';
+const AUDIO_VARIANT_MARK = `(?:(?:SE|効果音|효과음|加工|エフェクト|이펙트|가공|effects?|FX)\\s*(?:${AUDIO_OFF_MARK}|${AUDIO_ON_MARK})|no\\s*(?:SE|effects?|FX)|無加工|未加工)`;
+const AUDIO_BRACKET_RE = new RegExp(`[(（[［【〔]\\s*(${AUDIO_VARIANT_MARK}|SE)\\s*[)）\\]］】〕]`, 'gi');
+const AUDIO_SUFFIX_RE = new RegExp(`[\\s_\\-–—.]*(${AUDIO_VARIANT_MARK})$|[\\s_\\-–—.]+(SE)$`, 'i');
+const AUDIO_OFF_RE = new RegExp(`^(?:no\\s*|無加工|未加工)|${AUDIO_OFF_MARK}$`, 'i');
+const AUDIO_PROCESSING_RE = /加工|エフェクト|이펙트|가공|effects?|FX/i;
 
-// 같은 폴더에서 제목(prefix+body)이 같고 "효과음 있음/없음" suffix만 다른 미디어들을 묶는다.
-// 효과음 없는 판이 정확히 하나면 그걸로만 STT를 돌리고, 나머지(효과음 있는 판 등)는
-// 그 결과를 그대로 재사용한다 — 같은 대사를 효과음 유무만 다르게 두 번 STT할 필요가 없다.
-function pairSeVariants(files) {
-  const groups = new Map(); // `dir::prefix::body` → [{ file, suffix }]
-  for (const f of files) {
-    if (isSubtitleFile(f)) continue;
-    const parts = splitNameAffixes(f.name.replace(/\.[^.]+$/, ''));
-    const key = `${relDirOf(f)}::${parts.prefix}::${parts.body}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push({ file: f, suffix: parts.suffix });
+function parseAudioVariantName(name) {
+  const flags = { se: null, processing: null };
+  let ambiguous = false;
+  const record = (marker) => {
+    const kind = AUDIO_PROCESSING_RE.test(marker) ? 'processing' : 'se';
+    const enabled = !AUDIO_OFF_RE.test(marker);
+    if (flags[kind] !== null && flags[kind] !== enabled) ambiguous = true;
+    flags[kind] = enabled;
+  };
+  let title = name.replace(AUDIO_BRACKET_RE, (_, marker) => { record(marker); return ''; }).trim();
+  for (;;) {
+    const match = title.match(AUDIO_SUFFIX_RE);
+    if (!match) break;
+    record(match[1] || match[2]);
+    title = title.slice(0, match.index).trim();
   }
-  const primaryOf = new Map(); // 효과음 있는 판 등 File → 효과음 없는 판 File
-  for (const entries of groups.values()) {
-    if (entries.length < 2) continue;
-    const noSe = entries.filter((e) => NO_SE_SUFFIX_RE.test(e.suffix));
-    if (noSe.length !== 1) continue; // "효과음 없음"이 정확히 하나로 확인될 때만 합친다
-    const primary = noSe[0].file;
-    for (const e of entries) {
-      if (e.file !== primary) primaryOf.set(e.file, primary);
-    }
-  }
-  return { primaryOf, filesToProcess: files.filter((f) => !primaryOf.has(f)) };
+  return { title, flags, ambiguous };
 }
 
-// 효과음 유무가 파일명 접미사가 아니라 "폴더 자체"로 나뉜 경우 — 예: "02.音声/" 안에
-// 원본이 있고 그 안에 "水音SEなし"(효과음 없음) 하위 폴더가 따로 있는데, 그 안의
-// 파일명이 부모 폴더와 같거나 "01(SE無し).제목.wav"처럼 괄호로 감싼 SE 표기만 다른 경우.
-// 번호·제목·일반 말머리·확장자는 그대로 비교하고, 명시적인 SE 표기만 비교에서 제외한다.
-// 부모 파일과 효과음 없는 판이 각각 하나로 확인될 때만 자막을 재사용한다.
-const NO_SE_FOLDER_RE = /(SE|効果音|효과음).{0,4}(less|なし|無し|カット|cut|off|オフ|없음|없이)/i;
-const BRACKETED_SE_MARK_RE = new RegExp(`[(（[［【〔]\\s*${SE_MARK}\\s*[)）\\]］】〕]`, 'gi');
+function audioVariantOf(file) {
+  const ext = fileExt(file.name);
+  const parsed = parseAudioVariantName(ext ? file.name.slice(0, -ext.length) : file.name);
+  if (!parsed.title || parsed.ambiguous) return null;
+  const flags = { ...parsed.flags };
+  const dirs = relDirOf(file).split('/').filter(Boolean);
+  // 형제/중첩된 버전 폴더만 거슬러 올라간다. 작품·디스크 등 일반 폴더 경계는 유지한다.
+  while (dirs.length > 0) {
+    const folder = parseAudioVariantName(dirs[dirs.length - 1].replace(/(?:版|バージョン|버전|version)\s*$/i, ''));
+    if (folder.ambiguous || Object.values(folder.flags).every(value => value === null)) break;
+    for (const kind of ['se', 'processing']) {
+      // 파일명 → 가장 가까운 버전 폴더 → 상위 버전 폴더 순으로 구체적인 표기를 우선한다.
+      if (flags[kind] === null) flags[kind] = folder.flags[kind];
+    }
+    dirs.pop();
+  }
+  // 효과음 없음이 가공 없음보다 우선. 같은 SE 상태면 가공 없음 > 미표기 > 가공 있음.
+  // 미표기(예: "SEなし"만 있는 파일)를 가공 없음으로 취급하지는 않는다.
+  const score = (flags.se === false ? 4 : 0)
+    + (flags.processing === false ? 2 : flags.processing === null ? 1 : 0);
+  return { key: JSON.stringify([dirs.join('/'), parsed.title, ext]), flags, score };
+}
 
-function pairSeVariantsByFolder(files) {
-  const byDirAndName = new Map(); // `dir::SE 표기만 제외한 파일명` → File[]
-  for (const f of files) {
-    if (isSubtitleFile(f)) continue;
-    const key = `${relDirOf(f)}::${f.name.replace(BRACKETED_SE_MARK_RE, '')}`;
-    if (!byDirAndName.has(key)) byDirAndName.set(key, []);
-    byDirAndName.get(key).push(f);
+function pairAudioVariants(files) {
+  const groups = new Map();
+  for (const file of files) {
+    if (isSubtitleFile(file)) continue;
+    const variant = audioVariantOf(file);
+    if (!variant) continue;
+    if (!groups.has(variant.key)) groups.set(variant.key, []);
+    groups.get(variant.key).push({ file, ...variant });
   }
-  const candidates = new Map(); // 부모 File → 대응할 수 있는 효과음 없는 File[]
-  for (const f of files) {
-    if (isSubtitleFile(f)) continue;
-    const dir = relDirOf(f);
-    const segs = dir ? dir.split('/') : [];
-    const leaf = segs[segs.length - 1];
-    if (!leaf || !NO_SE_FOLDER_RE.test(leaf)) continue;
-    const parentDir = segs.slice(0, -1).join('/');
-    const name = f.name.replace(BRACKETED_SE_MARK_RE, '');
-    const counterparts = byDirAndName.get(`${parentDir}::${name}`);
-    if (!counterparts || counterparts.length !== 1) continue;
-    const counterpart = counterparts[0];
-    if (!candidates.has(counterpart)) candidates.set(counterpart, []);
-    candidates.get(counterpart).push(f);
+  const primaryOf = new Map();
+  for (const entries of groups.values()) {
+    if (entries.length < 2) continue;
+    const bestScore = Math.max(...entries.map(entry => entry.score));
+    const best = entries.filter(entry => entry.score === bestScore);
+    // 동률이면 임의로 고르지 않고 모두 처리한다. 없음 표기가 없는 그룹도 합치지 않는다.
+    if (best.length !== 1 || (best[0].flags.se !== false && best[0].flags.processing !== false)) continue;
+    for (const entry of entries) {
+      if (entry !== best[0]) primaryOf.set(entry.file, best[0].file);
+    }
   }
-  const primaryOf = new Map(); // 부모 폴더(효과음 있음) File → 하위 폴더(효과음 없음) File
-  for (const [counterpart, cleanVersions] of candidates) {
-    if (cleanVersions.length === 1) primaryOf.set(counterpart, cleanVersions[0]);
-  }
-  return { primaryOf, filesToProcess: files.filter((f) => !primaryOf.has(f)) };
+  // 항상 최종 원본에 직접 연결하므로 폴더/접미사 매칭이 겹쳐도 중간 결과가 사라지지 않는다.
+  return { primaryOf, filesToProcess: files.filter(file => !primaryOf.has(file)) };
 }
 
 async function run() {
   const skipTranslate = els.skipTranslate.checked;
   const { companionOf, filesToProcess: afterCompanion } = pairCompanionSubtitles(selectedFiles);
-  // 효과음 있음/없음만 다른 동일 대사 판은 효과음 없는 쪽 하나로만 STT를 돌린다 —
-  // 폴더 자체로 나뉜 경우(예: "水音SEなし" 하위 폴더)와 파일명 접미사로 나뉜 경우
-  // 둘 다 감지해서 합친다.
-  const { primaryOf: primaryOfFolder, filesToProcess: afterFolderSe } = pairSeVariantsByFolder(afterCompanion);
-  const { primaryOf: primaryOfSuffix, filesToProcess } = pairSeVariants(afterFolderSe);
-  const primaryOf = new Map([...primaryOfFolder, ...primaryOfSuffix]);
+  // 동일 트랙의 모든 판을 한 번에 비교해 효과음·가공 상태로 최종 원본 하나를 고른다.
+  const { primaryOf, filesToProcess } = pairAudioVariants(afterCompanion);
   const hasMedia = filesToProcess.some((f) => !isSubtitleFile(f) && !companionOf.has(f));
   const allSubtitles = filesToProcess.every((f) => isSubtitleFile(f) || companionOf.has(f));
 
@@ -2929,8 +2930,7 @@ async function run() {
       }
     }
 
-    // 효과음 있음 등 부차 판은 효과음 없는 판(primary)을 실제로 처리한 결과를 그대로 재사용한다 —
-    // 대사는 같고 효과음만 다르므로 같은 자막을 새 파일명으로만 다시 붙여 내보낸다.
+    // 부차 판은 선택한 primary의 결과를 그대로 재사용한다. 대사와 타이밍이 같다는 전제다.
     for (const [secondary, primary] of primaryOf) {
       const base = fileToResult.get(primary);
       if (!base || base.error) continue;
