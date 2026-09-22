@@ -44,12 +44,13 @@ Upload a video or audio file — Whisper AI extracts SRT subtitles, then Gemini 
 ## 번역 모델 / Translation models
 
 기본값은 **`gemini-3.1-flash-lite`** 입니다. 모델 id가 `gemini`로 시작하면 Gemini API,
-그 외에는 Anthropic API로 라우팅됩니다 (`isGeminiModel()`).
+`gpt`로 시작하면 OpenAI API, 그 외에는 Anthropic API로 라우팅됩니다.
 
 | 엔진 | 필요한 키 | 배치 방식 |
 |---|---|---|
 | Gemini | Google Gemini API 키 (예비 키 2개까지) | 하루 **요청 횟수** 한도가 빡빡해 파일 전체를 한 번에 전송 |
 | Claude | Anthropic API 키 | 번역 20줄 / 교정 40줄 단위 배치 |
+| GPT 6 Luna / GPT 5.6 Luna | OpenAI API 키 | 번역 20줄 / 교정 40줄 단위 배치 |
 
 Groq·Gemini 모두 예비 키를 넣어두면 한도 도달 시 자동 전환합니다.
 무료 한도는 계정 단위라 예비 키는 **다른 계정**에서 발급해야 효과가 있습니다.
