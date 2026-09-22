@@ -143,3 +143,94 @@ test('batch processes five clean tracks and exports subtitles for all ten files'
     assert.equal(result.origRelDir, 'Collection/02.Audio');
   }
 });
+
+function mixedTracks() {
+  const files = [];
+  const preferred = [];
+  for (let n = 1; n <= 6; n++) {
+    const title = `${String(n).padStart(2, '0')}.Track ${n}`;
+    files.push(file(`Collection/Audio/${title}　加工あり.wav`));
+    const raw = file(`Collection/Audio/加工なし/${title}　加工なし.wav`);
+    files.push(raw);
+    if ([1, 3, 4].includes(n)) {
+      files.push(file(`Collection/Audio/SEなし/${title}　加工あり　SEなし.wav`));
+      const clean = file(`Collection/Audio/SEなし/${title}　加工なし　SEなし.wav`);
+      files.push(clean);
+      preferred.push(clean);
+    } else {
+      let source = raw;
+      if (n === 2) {
+        source = file(`Collection/Audio/SEなし/${title}　加工あり.wav`);
+        files.push(source);
+      }
+      if (n === 5) {
+        files.push(file(`Collection/Audio/SEなし/${title}　加工あり　SEなし.wav`));
+        source = file(`Collection/Audio/SEなし/${title}　SEなし.wav`);
+        files.push(source);
+      }
+      preferred.push(source);
+    }
+  }
+  return { files, preferred };
+}
+
+test('mixed SE and processing variants use six clean sources for all 21 results', async () => {
+  const { files, preferred } = mixedTracks();
+  for (const input of [files, [...files].reverse()]) {
+    const { app, calls, errors, els } = pipelineApp(input);
+    await app.run();
+    assert.deepEqual(errors, []);
+    assert.equal(calls.length, 6);
+    assert.deepEqual(new Set(calls), new Set(preferred));
+    assert.equal(app.allResults.length, 21);
+    assert.equal(els.resultStats.textContent, '21/21');
+    for (const original of files) {
+      const result = app.allResults.find(r => `${r.origRelDir}/${r.fileName}` === original.webkitRelativePath);
+      assert.ok(result, original.webkitRelativePath);
+      const source = preferred.find(f => f.name.slice(0, 2) === original.name.slice(0, 2));
+      assert.equal(result.originalSrt, `original:${source.name}`);
+      assert.equal(result.translatedSrt, `translated:${source.name}`);
+    }
+  }
+});
+
+test('mixed folder preview marks 15 files for reuse and six for extraction', () => {
+  const { files } = mixedTracks();
+  const { app, els } = pipelineApp(files);
+  app.handleFiles(files, { filterExts: true });
+  const labels = els.fileInfo.children.map(child => child.textContent);
+  assert.equal(labels.filter(text => text.includes('reuse-clean')).length, 15);
+  assert.equal(labels.filter(text => text.includes('extract')).length, 6);
+});
+
+test('folder and filename markers cannot leave indirect reuse targets without results', async () => {
+  const files = ['Audio/01.Title.wav', 'Audio/SEなし/01.Title.wav', 'Audio/SEなし/01.Title　加工なし.wav'].map(file);
+  const { app, calls } = pipelineApp(files);
+  await app.run();
+  assert.deepEqual(calls, [files[2]]);
+  assert.equal(app.allResults.length, 3);
+});
+
+test('Korean effect-free and SE-free sibling folders choose the doubly clean version', async () => {
+  const files = ['Audio/01.Title 이펙트있음.wav', 'Audio/이펙트없음/01.Title 이펙트없음.wav', 'Audio/효과음없음/01.Title 이펙트없음 효과음없음.wav'].map(file);
+  const { app, calls } = pipelineApp(files);
+  await app.run();
+  assert.deepEqual(calls, [files[2]]);
+  assert.equal(app.allResults.length, 3);
+});
+
+test('nested processing and SE folders can identify a clean source without filename markers', async () => {
+  const files = ['Audio/01.Title.wav', 'Audio/加工なし/01.Title.wav', 'Audio/加工なし/SEなし/01.Title.wav'].map(file);
+  const { app, calls } = pipelineApp(files);
+  await app.run();
+  assert.deepEqual(calls, [files[2]]);
+  assert.equal(app.allResults.length, 3);
+});
+
+test('equally preferred processing-free candidates stay independent', async () => {
+  const files = ['Audio/01.Title 加工あり.wav', 'Audio/加工なし/01.Title 加工なし.wav', 'Audio/エフェクトなし/01.Title 加工なし.wav'].map(file);
+  const { app, calls } = pipelineApp(files);
+  await app.run();
+  assert.equal(calls.length, 3);
+  assert.equal(app.allResults.length, 3);
+});
