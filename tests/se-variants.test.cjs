@@ -235,3 +235,39 @@ test('equally preferred processing-free candidates stay independent', async () =
   assert.equal(calls.length, 3);
   assert.equal(app.allResults.length, 3);
 });
+
+test('SE-free with unknown processing is not labeled as unprocessed', () => {
+  const variant = loadApp().audioVariantOf(file('Audio/SEなし/05.Title　SEなし.wav'));
+  assert.equal(variant.flags.se, false);
+  assert.equal(variant.flags.processing, null);
+});
+
+test('explicit filename status takes priority over a conflicting folder label', () => {
+  const variant = loadApp().audioVariantOf(file('Audio/SEなし/01.Title　SEあり.wav'));
+  assert.equal(variant.flags.se, true);
+});
+
+test('contradictory filename labels and empty normalized names do not get paired', () => {
+  const app = loadApp();
+  const files = ['Audio/01.Title.wav', 'Audio/01(SEあり).Title_SEなし.wav', 'Audio/SEless.wav'].map(file);
+  const { primaryOf, filesToProcess } = app.pairAudioVariants(files);
+  assert.equal(primaryOf.size, 0);
+  assert.equal(filesToProcess.length, 3);
+});
+
+test('plain duplicate names without clean labels are not silently merged', () => {
+  const files = [file('Audio/01.Title.wav'), file('Audio/01.Title.wav')];
+  assert.equal(loadApp().pairAudioVariants(files).filesToProcess.length, 2);
+});
+
+test('English SE and processing labels work together in one folder', () => {
+  const files = ['01.Title FXon SEon.wav', '01.Title(no FX)_no SE.wav'].map(file);
+  const { primaryOf, filesToProcess } = loadApp().pairAudioVariants(files);
+  assert.equal(primaryOf.get(files[0]), files[1]);
+  assert.equal(filesToProcess.length, 1);
+});
+
+test('does not cross collection or ordinary disc folder boundaries', () => {
+  const files = ['Collection A/Audio/01.Title.wav', 'Collection B/Audio/SEなし/01.Title.wav', 'Collection A/Audio/Disc 2/加工なし/01.Title.wav'].map(file);
+  assert.equal(loadApp().pairAudioVariants(files).primaryOf.size, 0);
+});
