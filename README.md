@@ -52,6 +52,8 @@ Upload a video or audio file — Whisper AI extracts SRT subtitles, then Gemini 
 | Claude | Anthropic API 키 | 번역 20줄 / 교정 40줄 단위 배치 |
 | GPT 6 Luna / GPT 5.6 Luna | OpenAI API 키 | 번역 20줄 / 교정 40줄 단위 배치 |
 
+Claude Opus 5.5는 Anthropic API 정책상 thinking을 항상 사용하므로, 이 모델을 선택하면 해당 옵션을 끄지 않고 호출합니다.
+
 Groq·Gemini 모두 예비 키를 넣어두면 한도 도달 시 자동 전환합니다.
 무료 한도는 계정 단위라 예비 키는 **다른 계정**에서 발급해야 효과가 있습니다.
 
