@@ -1271,6 +1271,11 @@ function getAnthropicClient() {
   return anthropicClient;
 }
 
+function claudeThinkingConfig(model) {
+  // Opus 5.5 always uses thinking; Anthropic rejects an explicit disabled value.
+  return model === 'claude-opus-5-5' ? null : { type: 'disabled' };
+}
+
 async function callClaude(prompt) {
   const client = getAnthropicClient();
   const model = els.model.value;
@@ -1282,12 +1287,10 @@ async function callClaude(prompt) {
         max_tokens: 16000,
         messages: [{ role: 'user', content: prompt }],
       };
-      // Claude Opus 5 / Sonnet 5 부터는 thinking 을 생략하면 '켜짐'이 기본이다.
-      // (Opus 4.8 이하는 생략 = 꺼짐이었다.) 번역·교정에는 추론이 불필요한데
-      // 사고 토큰이 출력 요금으로 과금되고, max_tokens 을 사고와 나눠 쓰게 되어
-      // 긴 배치가 잘릴 수 있다. Gemini 쪽과 같은 이유로 명시적으로 끈다.
-      // 거부되면 빼지 않고 중단한다 (아래 catch 참조) — 그래서 조건 없이 항상 보낸다.
-      body.thinking = { type: 'disabled' };
+      // 번역·교정에는 추론이 불필요해 가능한 모델에서는 끈다. 단, Opus 5.5는
+      // thinking을 항상 사용하며 명시적인 disabled 값을 거부하므로 필드를 생략한다.
+      const thinking = claudeThinkingConfig(model);
+      if (thinking) body.thinking = thinking;
       if (!rejects('structuredOutput', model)) {
         body.output_config = { format: { type: 'json_schema', schema: TRANSLATION_SCHEMA } };
       }

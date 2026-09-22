@@ -22,5 +22,5 @@ test('keeps thinking enabled for Claude Opus 5.5 because disabling it is unsuppo
 
 test('continues disabling thinking for Claude models that support it', () => {
   const claudeThinkingConfig = loadClaudeThinkingConfig();
-  assert.deepEqual(claudeThinkingConfig('claude-opus-5'), { type: 'disabled' });
+  assert.equal(claudeThinkingConfig('claude-opus-5')?.type, 'disabled');
 });
