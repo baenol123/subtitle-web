@@ -271,3 +271,24 @@ test('does not cross collection or ordinary disc folder boundaries', () => {
   const files = ['Collection A/Audio/01.Title.wav', 'Collection B/Audio/SEなし/01.Title.wav', 'Collection A/Audio/Disc 2/加工なし/01.Title.wav'].map(file);
   assert.equal(loadApp().pairAudioVariants(files).primaryOf.size, 0);
 });
+
+// RJ01516997: sibling folders named "効果音ありMP3"/"効果音なしMP3" — the SE marker sits at
+// the START of the folder name, followed by trailing non-marker text ("MP3"), not at the very
+// end. The plain suffix regex only matches when the marker is the last thing in the string.
+test('recognizes SE markers followed by trailing text in sibling folder names', () => {
+  const files = [
+    'Work/効果音ありMP3/1・Track One.mp3',
+    'Work/効果音なしMP3/1・Track One.mp3',
+    'Work/効果音ありMP3/2・Track Two.mp3',
+    'Work/効果音なしMP3/2・Track Two.mp3',
+  ].map(file);
+  const { primaryOf, filesToProcess } = loadApp().pairAudioVariants(files);
+  assert.equal(primaryOf.size, 2);
+  assert.equal(filesToProcess.length, 2);
+  assert.ok(filesToProcess.every((f) => f.webkitRelativePath.includes('効果音なしMP3')));
+});
+
+test('folder-level marker with trailing text does not misfire on unrelated folder names', () => {
+  const files = ['Work/Disc1/01.Title.wav', 'Work/Disc2/01.Title.wav'].map(file);
+  assert.equal(loadApp().pairAudioVariants(files).primaryOf.size, 0);
+});

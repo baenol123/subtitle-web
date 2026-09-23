@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-23.1';
+const APP_VERSION = '2026-09-24.1';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -2774,6 +2774,23 @@ function parseAudioVariantName(name) {
   return { title, flags, ambiguous };
 }
 
+// 폴더명은 파일명과 달리 표기 뒤에 확장자성 텍스트가 더 붙기도 한다(예: "効果音なしMP3"의
+// "MP3"). parseAudioVariantName의 접미사 매칭(AUDIO_SUFFIX_RE)은 문자열 끝에 고정돼 있어
+// 이런 경우를 놓치므로, 접미사/괄호 형태로 못 찾았을 때 위치 제약 없이 한 번 더 찾는다.
+// 오탐 위험이 낮은 폴더명 전용 완화 — 파일명 쪽(parseAudioVariantName)은 그대로 엄격하게 둔다.
+const AUDIO_VARIANT_ANYWHERE_RE = new RegExp(AUDIO_VARIANT_MARK, 'i');
+
+function parseAudioVariantFolderName(name) {
+  const parsed = parseAudioVariantName(name);
+  if (parsed.ambiguous || !Object.values(parsed.flags).every((v) => v === null)) return parsed;
+  const match = name.match(AUDIO_VARIANT_ANYWHERE_RE);
+  if (!match) return parsed;
+  const flags = { se: null, processing: null };
+  const kind = AUDIO_PROCESSING_RE.test(match[0]) ? 'processing' : 'se';
+  flags[kind] = !AUDIO_OFF_RE.test(match[0]);
+  return { title: parsed.title, flags, ambiguous: false };
+}
+
 function audioVariantOf(file) {
   const ext = fileExt(file.name);
   const parsed = parseAudioVariantName(ext ? file.name.slice(0, -ext.length) : file.name);
@@ -2782,7 +2799,7 @@ function audioVariantOf(file) {
   const dirs = relDirOf(file).split('/').filter(Boolean);
   // 형제/중첩된 버전 폴더만 거슬러 올라간다. 작품·디스크 등 일반 폴더 경계는 유지한다.
   while (dirs.length > 0) {
-    const folder = parseAudioVariantName(dirs[dirs.length - 1].replace(/(?:版|バージョン|버전|version)\s*$/i, ''));
+    const folder = parseAudioVariantFolderName(dirs[dirs.length - 1].replace(/(?:版|バージョン|버전|version)\s*$/i, ''));
     if (folder.ambiguous || Object.values(folder.flags).every(value => value === null)) break;
     for (const kind of ['se', 'processing']) {
       // 파일명 → 가장 가까운 버전 폴더 → 상위 버전 폴더 순으로 구체적인 표기를 우선한다.
