@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-24.2';
+const APP_VERSION = '2026-09-27.1';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -2800,6 +2800,7 @@ function audioVariantOf(file) {
   if (!parsed.title || parsed.ambiguous) return null;
   const flags = { ...parsed.flags };
   const dirs = relDirOf(file).split('/').filter(Boolean);
+  let climbed = 0;
   // 형제/중첩된 버전 폴더만 거슬러 올라간다. 작품·디스크 등 일반 폴더 경계는 유지한다.
   while (dirs.length > 0) {
     const folder = parseAudioVariantFolderName(dirs[dirs.length - 1].replace(/(?:版|バージョン|버전|version)\s*$/i, ''));
@@ -2809,22 +2810,48 @@ function audioVariantOf(file) {
       if (flags[kind] === null) flags[kind] = folder.flags[kind];
     }
     dirs.pop();
+    climbed++;
   }
   // 효과음 없음이 가공 없음보다 우선. 같은 SE 상태면 가공 없음 > 미표기 > 가공 있음.
   // 미표기(예: "SEなし"만 있는 파일)를 가공 없음으로 취급하지는 않는다.
   const score = (flags.se === false ? 4 : 0)
     + (flags.processing === false ? 2 : flags.processing === null ? 1 : 0);
-  return { key: JSON.stringify([dirs.join('/'), parsed.title, ext]), flags, score };
+  // 표기 폴더를 하나 이상 실제로 걷어냈는데 최상위 작품 폴더 하나만 남았다면(예:
+  // "03_SEなし/WAV_SEなし/" 처럼 원본("01_WAV")과는 겹치는 폴더명이 하나도 없이 통째로
+  // 다른 트리에 있는 경우), 그 최상위 폴더 아래 어디에 있든 같은 제목이면 짝지을 수
+  // 있도록 느슨한 키도 같이 반환한다. climbed===0인 파일(애초에 표기가 없어 그대로인
+  // 파일)에는 적용하지 않는다 — 우연히 폴더 깊이가 1인 것과 표기를 다 걷어내 1이 된
+  // 것을 구분해야, 표기 없는 형제 폴더끼리 엉뚱하게 합쳐지는 걸 막을 수 있다.
+  const looseKey = climbed > 0 && dirs.length === 1 ? JSON.stringify([dirs[0], parsed.title, ext]) : null;
+  return { key: JSON.stringify([dirs.join('/'), parsed.title, ext]), looseKey, flags, score };
 }
 
 function pairAudioVariants(files) {
   const groups = new Map();
+  const entries = [];
   for (const file of files) {
     if (isSubtitleFile(file)) continue;
     const variant = audioVariantOf(file);
     if (!variant) continue;
+    const entry = { file, ...variant };
+    entries.push(entry);
     if (!groups.has(variant.key)) groups.set(variant.key, []);
-    groups.get(variant.key).push({ file, ...variant });
+    groups.get(variant.key).push(entry);
+  }
+  // looseKey가 있는(표기 폴더를 걷어내다 작품 최상위까지 다다른) 항목 중, 제 키로는
+  // 짝을 못 찾은 것만 최상위 폴더·제목·확장자가 일치하는 다른 그룹으로 옮겨 합류시킨다.
+  // 후보 그룹이 둘 이상이면(어느 쪽이 맞는지 애매하면) 추측하지 않고 그대로 둔다.
+  for (const entry of entries) {
+    if (!entry.looseKey || groups.get(entry.key).length > 1) continue;
+    const candidates = [...groups.entries()].filter(([key]) => {
+      if (key === entry.key) return false;
+      const [dirsJoined, title, ext] = JSON.parse(key);
+      const [rootWanted, titleWanted, extWanted] = JSON.parse(entry.looseKey);
+      return dirsJoined.split('/')[0] === rootWanted && title === titleWanted && ext === extWanted;
+    });
+    if (candidates.length !== 1) continue;
+    groups.set(entry.key, groups.get(entry.key).filter((e) => e !== entry));
+    candidates[0][1].push(entry);
   }
   const primaryOf = new Map();
   for (const entries of groups.values()) {

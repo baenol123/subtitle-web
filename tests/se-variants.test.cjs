@@ -292,3 +292,43 @@ test('folder-level marker with trailing text does not misfire on unrelated folde
   const files = ['Work/Disc1/01.Title.wav', 'Work/Disc2/01.Title.wav'].map(file);
   assert.equal(loadApp().pairAudioVariants(files).primaryOf.size, 0);
 });
+
+// RJ01004682: the "has-SE" side lives in a plain, unmarked container ("01_WAV") while the
+// "no-SE" side lives in a completely different subtree ("03_SEなし/WAV_SEなし/") that climbs
+// all the way past two marked folders back to the bare work root. The two computed directory
+// keys never match exactly ("Work/01_WAV" vs "Work"), so the original exact-key grouping
+// missed this pairing entirely even though both filenames (after their own marker is
+// stripped) are identical.
+test('pairs a plain container folder with a fully separate no-SE subtree under the same work root', () => {
+  const files = [
+    'RJ01004682/01_WAV/トラック01 プロローグ.wav',
+    'RJ01004682/03_SEなし/WAV_SEなし/トラック01 プロローグ【SEなし】.wav',
+    'RJ01004682/01_WAV/トラックEX 密着オナサポ.wav',
+    'RJ01004682/03_SEなし/WAV_SEなし/トラックEX 密着オナサポ.wav',
+  ].map(file);
+  const { primaryOf, filesToProcess } = loadApp().pairAudioVariants(files);
+  assert.equal(primaryOf.size, 2);
+  assert.equal(filesToProcess.length, 2);
+  assert.ok(filesToProcess.every((f) => f.webkitRelativePath.includes('03_SEなし/WAV_SEなし')));
+});
+
+test('does not guess when a fully-climbed no-SE file could match more than one same-titled root candidate', () => {
+  const files = [
+    'Work/01_WAV/01.Title.wav',
+    'Work/02_Alt/01.Title.wav',
+    'Work/SEなし/01(SEなし).Title.wav',
+  ].map(file);
+  const { primaryOf, filesToProcess } = loadApp().pairAudioVariants(files);
+  assert.equal(primaryOf.size, 0);
+  assert.equal(filesToProcess.length, 3);
+});
+
+test('a plain file that merely happens to sit one folder deep is not treated as a wildcard target', () => {
+  // Nothing here was climbed (no marker anywhere), so no looseKey should ever let
+  // 'Audio/01.Opening.wav' get pulled into an unrelated marked sibling folder.
+  const files = [
+    'Audio/01.Opening.wav',
+    'Audio/Alternative/01(SE無し).Opening.wav',
+  ].map(file);
+  assert.equal(loadApp().pairAudioVariants(files).primaryOf.size, 0);
+});
