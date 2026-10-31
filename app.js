@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-09-27.1';
+const APP_VERSION = '2026-10-31.1';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -1378,7 +1378,11 @@ async function callGemini(prompt) {
   for (;;) {
     checkCancelled();
     const key = keys[geminiKeyIndex % keys.length];
-    const generationConfig = { responseMimeType: 'application/json', temperature: 0.2 };
+    // maxOutputTokens를 안 주면 모델 기본 한도(flash-lite는 65536)까지 다 쓸 수 있다 —
+    // 실사용자가 짧은 입력(1788 프롬프트 토큰)에도 65521 토큰을 쏟아내며 102초 만에
+    // MAX_TOKENS로 잘리는 폭주(반복 생성 루프로 추정) 사례를 겪어서, 어차피 자막 번역에
+    // 그만큼 길 필요가 없는 선에서 cap을 걸어 폭주해도 훨씬 빨리·싸게 끝나게 한다.
+    const generationConfig = { responseMimeType: 'application/json', temperature: 0.2, maxOutputTokens: 32768 };
     const thinking = rejects('thinking', model) ? null : geminiThinkingConfig(model);
     if (thinking) generationConfig.thinkingConfig = thinking;
     const sendSafety = !rejects('safety', model);
@@ -1656,9 +1660,14 @@ async function translateBatchWithSplit(batch, opts) {
 
     // 큰 배치에서 모델이 일부 줄을 빼먹거나 응답이 잘리면 빠진 줄만 모아 이어서 요청
     // (교정 모드는 '고칠 줄만 반환'이 정상이므로 잘린 경우에만 이어받는다)
+    // 이 이어받기도 예외 경로의 분할과 같은 splitBudget을 쓴다 — 모델이 같은 내용으로
+    // 비정상적으로 긴(반복 생성 등) 응답을 계속 내는 경우, 예산 없이는 "빠진 줄"이 똑같이
+    // 남아 매번 수십~백 초짜리 요청을 무한히 반복하게 된다(실사용자가 겪은 사례:
+    // promptTokenCount 1788에 candidatesTokenCount 65521로 MAX_TOKENS).
     if (!opts.refine) {
       const missing = batch.filter((b) => !byId.has(b.id));
-      if (missing.length > 0 && missing.length < batch.length) {
+      if (missing.length > 0 && missing.length < batch.length && splitBudget > 0) {
+        splitBudget--;
         const retried = await translateBatchWithSplit(missing, opts);
         for (const r of retried) {
           if (r.translation !== undefined) byId.set(r.id, r.translation);
@@ -1668,7 +1677,8 @@ async function translateBatchWithSplit(batch, opts) {
       // 회수된 마지막 id 이후의 줄들은 아직 검토되지 않았다 — 그 부분만 이어서 교정
       const maxId = Math.max(-1, ...byId.keys());
       const rest = batch.filter((b) => b.id > maxId);
-      if (rest.length > 0 && rest.length < batch.length) {
+      if (rest.length > 0 && rest.length < batch.length && splitBudget > 0) {
+        splitBudget--;
         const retried = await translateBatchWithSplit(rest, opts);
         for (const r of retried) {
           if (r.translation !== undefined) byId.set(r.id, r.translation);
