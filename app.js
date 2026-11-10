@@ -2112,8 +2112,11 @@ function translateRelDir(relDir, folderMap) {
 // PowerShell 문자열은 작은따옴표(') 하나만 조심하면(''로 두 번 써서 이스케이프) 되므로
 // cmd 특수문자를 하나하나 걸러내던 예전 로직(BAT_UNSAFE)도 통째로 필요 없어졌다.
 
+// PowerShell 은 ASCII ' 뿐 아니라 ‘ ’ ‚ ‛ 도 작은따옴표로 취급한다. 하나만 빠뜨려도
+// 파일명에 든 ’ 가 문자열을 닫아 스크립트가 깨지거나, 그 뒤 글자가 명령으로 실행된다.
+// 어느 쪽이든 두 번 쓰면 그 글자 하나로 읽힌다.
 function psQuote(str) {
-  return `'${String(str).replace(/'/g, "''")}'`;
+  return `'${String(str).replace(/['\u2018\u2019\u201A\u201B]/g, '$&$&')}'`;
 }
 
 // PowerShell -EncodedCommand 는 UTF-16LE로 인코딩한 뒤 Base64로 감싼 문자열을 요구한다.
@@ -2273,7 +2276,8 @@ function buildRenameBat(pairs, folderPairs = []) {
     // 경로를 넘기고, PowerShell이 Set-Location으로 직접 이동하게 한다(이러면 대괄호·
     // 괄호가 있어도 정상 동작함을 실측 확인).
     `Set-Location -LiteralPath $env:BATDIR`,
-    `$lines=Get-Content -LiteralPath '%~f0' -Encoding UTF8`,
+    // .bat 경로도 환경변수로 받는다 — '%~f0' 처럼 따옴표 안에 넣으면 경로에 ' 가 있을 때 깨진다.
+    `$lines=Get-Content -LiteralPath $env:BATFILE -Encoding UTF8`,
     `$idx=[Array]::IndexOf($lines,'${BAT_PAYLOAD_MARK}')`,
     `if($idx -lt 0){Write-Host 'PAYLOAD marker not found.';exit 1}`,
     `$b64=($lines[($idx+1)..($lines.Length-1)] -join '')`,
@@ -2289,6 +2293,7 @@ function buildRenameBat(pairs, folderPairs = []) {
     // 순수 ASCII 메커니즘(%~dp0)만 쓰므로 cmd의 UTF-8 줄바꿈 버그와 무관하게 안전하다.
     // cd 대신 환경변수로 넘기는 이유는 위 psReader 주석 참고.
     'set "BATDIR=%~dp0"',
+    'set "BATFILE=%~f0"',
     `powershell -NoProfile -ExecutionPolicy Bypass -Command "${psReader}"`,
     'if errorlevel 1 pause',
     'goto :eof',
