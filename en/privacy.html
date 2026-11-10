@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Privacy Policy — MakeSubtitles</title>
-  <meta name="description" content="MakeSubtitles privacy policy: what data we handle, third-party services (Groq, Google, Anthropic), cookies and advertising, and local storage." />
+  <meta name="description" content="MakeSubtitles privacy policy: what data we handle, third-party services, and local storage." />
   <meta name="robots" content="index, follow" />
   <link rel="canonical" href="https://makesubtitles.com/en/privacy" />
   <link rel="alternate" hreflang="ko" href="https://makesubtitles.com/privacy" />
@@ -12,8 +12,6 @@
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="MakeSubtitles" />
   <meta property="og:title" content="Privacy Policy — MakeSubtitles" />
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8450746629673540"
-     crossorigin="anonymous"></script>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -33,7 +31,7 @@
   <main class="container">
     <article class="doc">
       <h1>Privacy Policy</h1>
-      <p class="updated">Effective date: July 7, 2026</p>
+      <p class="updated">Effective date: November 10, 2026</p>
 
       <p>MakeSubtitles ("this site") respects your privacy. This policy explains what information the site handles,
          where it goes, and what you can control.</p>
@@ -46,30 +44,32 @@
       <h2>2. How uploaded files are processed</h2>
       <ul>
         <li>Video and audio files you select are <strong>never sent to our servers</strong> — they are processed entirely inside your browser.</li>
-        <li>The <strong>audio</strong> separated from your video is sent to <strong>Groq, Inc.</strong> for speech recognition, using your own API key.</li>
-        <li>Extracted or uploaded <strong>subtitle text</strong> is sent for translation — depending on the model you choose — to <strong>Google LLC</strong> (Gemini) or <strong>Anthropic, PBC</strong> (Claude), using your own API key.</li>
+        <li>The <strong>audio</strong> separated from your video is sent for speech recognition, using your own API key, to
+          <strong>Groq, Inc.</strong> (Whisper) or <strong>ElevenLabs</strong> (Scribe), depending on the model you choose.</li>
+        <li>Extracted or uploaded <strong>subtitle text</strong> — and <strong>file and folder names</strong> when filename translation is on —
+          is sent, using your own API key, to <strong>Google LLC</strong> (Gemini), <strong>Anthropic, PBC</strong> (Claude),
+          or <strong>OpenAI</strong> (GPT), depending on the model you choose. If you pick Grok for AI proofreading, the text to proofread is sent to <strong>xAI</strong>.</li>
         <li>Handling and retention of that data is governed by each provider's privacy policy:
-          <a href="https://groq.com/privacy-policy/" target="_blank" rel="noreferrer noopener">Groq Privacy Policy</a> ·
-          <a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noreferrer noopener">Anthropic Privacy Policy</a> · <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer noopener">Google Privacy Policy</a></li>
+          <a href="https://groq.com/privacy-policy/" target="_blank" rel="noreferrer noopener">Groq</a> ·
+          <a href="https://elevenlabs.io/privacy-policy" target="_blank" rel="noreferrer noopener">ElevenLabs</a> ·
+          <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer noopener">Google</a> ·
+          <a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noreferrer noopener">Anthropic</a> ·
+          <a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noreferrer noopener">OpenAI</a> ·
+          <a href="https://x.ai/legal/privacy-policy" target="_blank" rel="noreferrer noopener">xAI</a></li>
+        <li>Libraries the tool needs (Anthropic SDK, ffmpeg) and the web font are loaded, at pinned versions, from the jsDelivr and unpkg CDNs.
+          Those CDNs may receive connection details such as your IP address.</li>
       </ul>
 
       <h2>3. Local storage</h2>
       <p>For convenience, the following is stored in your browser's localStorage and never leaves your device:</p>
       <ul>
-        <li>The API keys you enter (Groq, Gemini, Anthropic)</li>
+        <li>The API keys you enter (Groq, Gemini, Anthropic, OpenAI, ElevenLabs, xAI, and backup keys)</li>
         <li>Tool settings such as languages and model, tone instructions, and glossary</li>
       </ul>
       <p>Clearing site data in your browser removes all of it. We recommend doing so after using a shared computer.</p>
 
       <h2>4. Cookies and advertising</h2>
-      <p>This site may display ads through Google AdSense. Regarding advertising:</p>
-      <ul>
-        <li>Third-party vendors, including Google, use cookies to serve ads based on your prior visits to this and other websites.</li>
-        <li>Google's use of advertising cookies enables it to serve personalized ads. You can opt out of personalized advertising at
-          <a href="https://www.google.com/settings/ads" target="_blank" rel="noreferrer noopener">Google Ads Settings</a>.</li>
-        <li>For more about third-party advertising cookies, see
-          <a href="https://policies.google.com/technologies/ads" target="_blank" rel="noreferrer noopener">Google's advertising policies</a>.</li>
-      </ul>
+      <p>This site shows no ads and uses no cookies.</p>
 
       <h2>5. Access logs and analytics</h2>
       <p>This site currently uses no separate visitor-analytics tool. The hosting platform (e.g. Cloudflare Pages)

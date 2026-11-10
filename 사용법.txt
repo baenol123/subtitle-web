@@ -5,7 +5,7 @@
 ────────────────────────────────────────
   index.html      메인 페이지 (자막 추출·번역 도구 + 소개/FAQ 콘텐츠)
   about.html      사이트 소개
-  privacy.html    개인정보처리방침 (애드센스 필수)
+  privacy.html    개인정보처리방침
   terms.html      이용약관
   _template.html  ★ 새 도구/페이지를 만들 때 복사해서 쓰는 템플릿
   style.css       공통 스타일 (파스텔 테마, 디자인 토큰 기반)
@@ -47,16 +47,16 @@
     · 남은 일: Google Search Console에 사이트 등록 + sitemap.xml 제출
 
 ────────────────────────────────────────
-5. 애드센스 신청 체크리스트
+5. 사이트 운영 체크리스트
 ────────────────────────────────────────
-  [완료] 개인정보처리방침 페이지 (쿠키/광고 고지 포함)
+  [완료] 개인정보처리방침 페이지 (전송 대상 서비스 전체 고지, 광고·쿠키 없음)
   [완료] 이용약관, 사이트 소개 페이지
   [완료] 본문 콘텐츠 (기능 소개, 사용 방법, FAQ)
   [완료] SEO 메타태그, 구조화 데이터, sitemap, robots.txt
   [완료] 커스텀 도메인 연결 (https://makesubtitles.com)
   [완료] 배포 주소 반영 (canonical/og:url/sitemap/robots)
-  [완료] 애드센스 스크립트 삽입 (전체 페이지 <head>)
-  [완료] ads.txt (pub-8450746629673540)
+  [방침] 광고 없음 — API 키가 localStorage에 있으므로 버전 고정이 안 되는
+         외부 스크립트(광고·분석 등)는 넣지 않는다
   [할 일] Search Console 등록 후 색인 생성 확인
   [참고] 문의 이메일은 현재 junsige29@gmail.com — 바꾸려면 about/privacy/terms.html에서 수정
 
@@ -64,7 +64,11 @@
 6. API 키 발급 (사용자 안내용)
 ────────────────────────────────────────
   · Groq (자막 추출):  https://console.groq.com/keys — 무료 티어 있음
+  · Gemini (번역, 기본값): https://aistudio.google.com/apikey — 무료 티어 있음
   · Anthropic (번역):  https://console.anthropic.com/settings/keys — 토큰당 과금
+  · OpenAI (번역):     https://platform.openai.com/api-keys — 토큰당 과금
+  · ElevenLabs (음성 인식, 선택): https://elevenlabs.io/app/settings/api-keys
+  · xAI (AI 교정, 선택):          https://console.x.ai
   · 키는 각 사용자의 브라우저(localStorage)에만 저장됨
 
 ────────────────────────────────────────

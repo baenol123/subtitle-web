@@ -13,8 +13,6 @@
   <meta property="og:site_name" content="자막공장" />
   <meta property="og:title" content="사이트 소개 — 자막공장" />
   <meta property="og:description" content="자막공장의 목적, 동작 방식, 사용 기술을 소개합니다." />
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8450746629673540"
-     crossorigin="anonymous"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -58,7 +56,7 @@
       <p>자막공장에는 서버가 없습니다. 사용자의 브라우저가 음성 인식(Groq)과 번역(Google Gemini 또는 Anthropic) 서비스를 직접 호출하는 구조라서,
          각 서비스의 API 키를 사용자가 직접 발급받아 입력하는 방식을 사용합니다. 이 방식에는 두 가지 장점이 있습니다.</p>
       <ul>
-        <li><strong>투명성:</strong> 데이터가 어디로 가는지 명확합니다. 오디오는 Groq으로, 자막 텍스트는 Google 또는 Anthropic으로만 전송되며 중간에 다른 서버를 거치지 않습니다.</li>
+        <li><strong>투명성:</strong> 데이터가 어디로 가는지 명확합니다. 오디오는 사용자가 고른 음성 인식 서비스(Groq 또는 ElevenLabs)로, 자막 텍스트는 고른 AI 서비스(Google·Anthropic·OpenAI, 교정에 Grok을 고르면 xAI)로만 전송되며 중간에 다른 서버를 거치지 않습니다.</li>
         <li><strong>비용 통제:</strong> 사용한 만큼만 본인 계정에서 지불하므로 구독료나 숨은 비용이 없습니다. 자막 작업 비용은 1시간 분량 기준 수십~수백 원 수준입니다.</li>
       </ul>
       <p>입력한 API 키는 브라우저의 로컬 저장소(localStorage)에만 저장되며 외부로 전송되지 않습니다.</p>

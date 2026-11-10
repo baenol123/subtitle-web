@@ -3,10 +3,10 @@
 **https://makesubtitles.com** — 영상 자막 추출 + AI 번역 웹 도구
 
 영상이나 오디오 파일을 올리면 Whisper AI가 자막(SRT)을 추출하고, Gemini 또는 Claude가 자연스럽게 번역합니다.
-**파일은 서버에 업로드되지 않고 브라우저 안에서만 처리됩니다.**
+**영상은 이 사이트 서버로 올라가지 않고 브라우저 안에서 처리됩니다.** 추출한 오디오와 자막 텍스트만 사용자가 고른 AI 서비스로 사용자의 키로 직접 전송됩니다.
 
 Upload a video or audio file — Whisper AI extracts SRT subtitles, then Gemini or Claude translates them naturally.
-**Files never leave your browser.** English version: https://makesubtitles.com/en/
+**Your video never reaches our servers** — only the extracted audio and text go, with your own key, to the AI services you pick. English version: https://makesubtitles.com/en/
 
 ## 동작 방식 / How it works
 
@@ -64,6 +64,7 @@ Groq·Gemini 모두 예비 키를 넣어두면 한도 도달 시 자동 전환�
 
 > ⚠ **외부 스크립트는 반드시 버전을 고정할 것.** 사용자 API 키가 이 페이지의 localStorage에
 > 저장되므로, 버전을 열어두면 패키지나 CDN이 오염됐을 때 전 사용자의 키가 유출될 수 있습니다.
+> 같은 이유로 버전을 고정할 수 없는 광고·분석 스크립트는 넣지 않습니다.
 > 현재 `@anthropic-ai/sdk@0.115.0`, `@ffmpeg/core@0.12.10`으로 고정돼 있습니다.
 
 ## 개발 / Development

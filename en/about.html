@@ -13,8 +13,6 @@
   <meta property="og:site_name" content="MakeSubtitles" />
   <meta property="og:title" content="About — MakeSubtitles" />
   <meta property="og:description" content="How MakeSubtitles works and why it was built." />
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8450746629673540"
-     crossorigin="anonymous"></script>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -58,7 +56,7 @@
       <p>MakeSubtitles has no server. Your browser calls the speech-recognition service (Groq) and the translation
          service (Google Gemini or Anthropic) directly, so you bring your own API keys. This design has two advantages:</p>
       <ul>
-        <li><strong>Transparency:</strong> it's clear where your data goes. Audio goes to Groq, subtitle text goes to Google or Anthropic — nothing passes through any middleman server.</li>
+        <li><strong>Transparency:</strong> it's clear where your data goes. Audio goes to the speech service you pick (Groq or ElevenLabs), subtitle text to the AI service you pick (Google, Anthropic, or OpenAI — or xAI if you choose Grok for proofreading). Nothing passes through any middleman server.</li>
         <li><strong>Cost control:</strong> you pay only for what you use, on your own accounts. Processing an hour-long video typically costs a few cents.</li>
       </ul>
       <p>Your API keys are stored only in your browser's local storage and are never transmitted anywhere else.</p>
