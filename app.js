@@ -15,7 +15,7 @@ import { toBlobURL } from './vendor/ffmpeg-util/index.js';
 
 // 배포된 버전이 맞는지 사용자·개발자 둘 다 페이지 하단에서 바로 확인할 수 있도록 —
 // 커밋마다 이 값을 올린다 (날짜.그날 몇 번째 배포인지).
-const APP_VERSION = '2026-11-11.1';
+const APP_VERSION = '2026-11-24.1';
 
 const CORE_ESM = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm';
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -395,6 +395,9 @@ const MODEL_SUCCESSORS = {
   'claude-opus-4-6': 'claude-opus-5',
   'claude-sonnet-4-6': 'claude-sonnet-5',
   'claude-sonnet-4-5': 'claude-sonnet-5',
+  // 2026-11-24 확인: gemini-2.5-flash-lite가 신규 사용자에게 404(서비스 종료)로
+  // 막힘 — 구글이 공식으로 안내하는 후속 모델로 이전한다.
+  'gemini-2.5-flash-lite': 'gemini-3.5-flash-lite',
 };
 if (els.model) {
   const saved = localStorage.getItem('subweb-model');
@@ -404,7 +407,7 @@ if (els.model) {
   }
   // 그래도 값이 없으면(완전히 사라진 모델) 기본 모델로 되돌린다
   if (!els.model.value) {
-    els.model.value = 'gemini-3.1-flash-lite';
+    els.model.value = 'gemini-3.5-flash-lite';
     localStorage.setItem('subweb-model', els.model.value);
   }
 }
